@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import yaml
 from fastapi import FastAPI, Query
@@ -40,7 +40,8 @@ def create_api(settings: Settings) -> FastAPI:
     app = FastAPI(title="AzurSmartMix Control API", version="0.1.0")
 
     docker_client = DockerClient()
-    sched = SchedulerClient(settings.sched_base_url)
+    now_ep = os.getenv("SCHED_NOW_ENDPOINT", "").strip() or None
+    sched = SchedulerClient(settings.sched_base_url, now_endpoint=now_ep)
 
     @app.get("/health")
     def health() -> Dict[str, Any]:
@@ -60,7 +61,6 @@ def create_api(settings: Settings) -> FastAPI:
         """
         base = _read_text_file(settings.config_path)
         if not base.get("present") or base.get("raw_text") is None:
-            # missing or unreadable -> still 200 with diagnostics
             return {
                 "present": bool(base.get("present")),
                 "path": base.get("path"),
@@ -73,7 +73,7 @@ def create_api(settings: Settings) -> FastAPI:
 
         raw_text = base["raw_text"]
         try:
-            data = yaml.safe_load(raw_text)  # dict/list/None
+            data = yaml.safe_load(raw_text)
             return {
                 "present": True,
                 "path": base.get("path"),
@@ -118,7 +118,6 @@ def create_api(settings: Settings) -> FastAPI:
 
     @app.get("/scheduler/now")
     async def scheduler_now() -> JSONResponse:
-        # This stays best-effort: your scheduler returns 404 on now endpoints, so we'll report a note.
         data = await sched.now_playing()
         return JSONResponse(data)
 
