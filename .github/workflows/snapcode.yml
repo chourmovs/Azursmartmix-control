@@ -1,0 +1,212 @@
+name: Export code snapshot (inline, no artifacts, filtered)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: export-code-snapshot
+  cancel-in-progress: true
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate combined_output.txt (inline exporter)
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import os
+          from pathlib import Path
+
+          OUTPUT_FILE = "combined_output.txt"
+
+          IGNORED_DIRS = {
+              ".git", ".github", "__pycache__", "venv", ".venv",
+              "node_modules", "dist", "build", ".next", ".nuxt",
+              "coverage", ".pytest_cache", ".mypy_cache",
+              "target",
+          }
+
+          IGNORED_FILENAMES = {
+              "package-lock.json",
+              "pnpm-lock.yaml",
+              "yarn.lock",
+              "bun.lockb",
+              "npm-shrinkwrap.json",
+              "Pipfile.lock",
+              "poetry.lock",
+              "uv.lock",
+              "Cargo.lock",
+              "composer.lock",
+          }
+
+          IGNORED_BINARY_EXTENSIONS = {
+              ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico",
+              ".pdf",
+              ".exe", ".dll", ".so", ".dylib",
+              ".zip", ".tar", ".gz", ".7z", ".rar",
+              ".mp3", ".wav", ".flac", ".ogg",
+          }
+
+          # Exclusion de contenu : on vire .json pour éviter les lockfiles/dumps
+          IGNORED_CONTENT_EXTENSIONS = {".md", ".json"}
+
+          # Allowlist stricte : uniquement sources + configs utiles
+          ALLOWED_CONTENT_EXTENSIONS = {
+              ".py", ".pyi",
+              ".js", ".ts", ".tsx", ".jsx",
+              ".rs",
+              ".go",
+              ".java", ".kt",
+              ".c", ".h", ".cpp", ".hpp",
+              ".cs",
+              ".sh", ".ps1", ".bat",
+              ".yml", ".yaml", ".toml", ".ini", ".env.example",
+              ".sql",
+          }
+
+          MAX_FILE_BYTES = 200 * 1024  # 200 KB
+
+          def normpath(p: Path) -> str:
+              return str(p).replace("\\", "/")
+
+          def should_ignore_path(p: Path) -> bool:
+              s = normpath(p)
+              for d in IGNORED_DIRS:
+                  if f"/{d}/" in s or s.endswith(f"/{d}"):
+                      return True
+              return False
+
+          def build_filetree(root: Path) -> str:
+              lines = []
+              for dirpath, dirnames, filenames in os.walk(root):
+                  dp = Path(dirpath)
+                  if should_ignore_path(dp):
+                      dirnames[:] = []
+                      continue
+
+                  rel = dp.relative_to(root)
+                  depth = len(rel.parts)
+                  indent = "  " * depth
+
+                  if rel != Path("."):
+                      lines.append(f"{indent}- {normpath(rel)}/")
+
+                  for fn in sorted(filenames):
+                      fp = dp / fn
+                      if should_ignore_path(fp):
+                          continue
+                      lines.append(f"{indent}  - {fn}")
+              return "\n".join(lines)
+
+          def should_include_content(fp: Path) -> bool:
+              if fp.name == OUTPUT_FILE:
+                  return False
+              if fp.name in IGNORED_FILENAMES:
+                  return False
+
+              ext = fp.suffix.lower()
+              if ext in IGNORED_BINARY_EXTENSIONS:
+                  return False
+              if ext in IGNORED_CONTENT_EXTENSIONS:
+                  return False
+
+              if ALLOWED_CONTENT_EXTENSIONS and ext not in ALLOWED_CONTENT_EXTENSIONS:
+                  return False
+
+              try:
+                  if fp.stat().st_size > MAX_FILE_BYTES:
+                      return False
+              except OSError:
+                  return False
+
+              return True
+
+          def main():
+              root = Path(".").resolve()
+              parts = []
+
+              parts.append("# Arborescence du dépôt\n\n")
+              parts.append(build_filetree(root))
+              parts.append("\n\n---\n")
+
+              for dirpath, dirnames, filenames in os.walk(root):
+                  dp = Path(dirpath)
+                  if should_ignore_path(dp):
+                      dirnames[:] = []
+                      continue
+
+                  for fn in sorted(filenames):
+                      fp = dp / fn
+                      if should_ignore_path(fp):
+                          continue
+                      if not should_include_content(fp):
+                          continue
+
+                      rel = fp.relative_to(root)
+                      parts.append(f"\n\n---\n# {normpath(rel)}\n---\n\n")
+                      try:
+                          parts.append(fp.read_text(encoding="utf-8"))
+                      except Exception as e:
+                          parts.append(f"[Erreur de lecture: {e}]\n")
+
+              combined = "".join(parts)
+              estimated_tokens = int(len(combined) / 4)
+              combined += f"\n\n---\n# Estimation du nombre de tokens : {estimated_tokens} tokens\n"
+
+              Path(OUTPUT_FILE).write_text(combined, encoding="utf-8")
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+      - name: Commit & push snapshot to code-snapshots branch (rebase-safe)
+        shell: bash
+        run: |
+          set -e
+          BRANCH="code-snapshots"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin "${BRANCH}:${BRANCH}" || true
+
+          if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+            git checkout "${BRANCH}"
+          else
+            git checkout -b "${BRANCH}"
+          fi
+
+          if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH}"; then
+            git rebase "origin/${BRANCH}"
+          fi
+
+          mkdir -p snapshots
+          TS="$(date -u +'%Y%m%d-%H%M%S')"
+          DEST="snapshots/combined_output_${TS}.txt"
+          mv combined_output.txt "$DEST"
+
+          git add "$DEST"
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore(snapshot): add filtered code snapshot ${TS}"
+
+          git pull --rebase origin "${BRANCH}" || true
+          git push origin "${BRANCH}"
