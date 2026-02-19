@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import docker
 from docker.errors import DockerException, NotFound
@@ -24,14 +25,16 @@ class DockerClient:
     """Read-only Docker wrapper for control-plane introspection.
 
     v1 helpers:
-    - container status summary (with rough age/uptime)
-    - parse engine logs to extract preprocess titles for "upcoming"
+    - container status summary (age/uptime)
+    - parse engine logs to extract *human titles* from 'preprocess:' lines
+      and compute "upcoming" after the current track (Icecast title).
     """
 
-    # Your log pattern: "INFO azurmixd.engine - preprocess: <title>"
-    _RE_PREPROCESS_TITLE = re.compile(r"\bpreprocess:\s*(?P<title>.+?)\s*$")
-    # In case some lines use another prefix, keep a tolerant fallback:
-    _RE_PREPROCESS_ANY = re.compile(r"\bpreprocess\b.*?:\s*(?P<title>.+?)\s*$")
+    _RE_PREPROCESS = re.compile(r"\bpreprocess:\s*(?P<rest>.+?)\s*$", re.IGNORECASE)
+    _RE_LEADING_IDX = re.compile(r"^\s*\d+\s*[\.\)]\s*")  # "1. " or "1) "
+    _RE_SAFE_ARROW = re.compile(r"\s*->\s*safe_[0-9a-f]{8,}\.wav\b", re.IGNORECASE)
+    _RE_PAREN_TRAIL = re.compile(r"\s*\(.*\)\s*$")
+    _RE_EXT = re.compile(r"\.(mp3|wav|flac|ogg|m4a|aac)\s*$", re.IGNORECASE)
 
     def __init__(self) -> None:
         self.client = docker.from_env()
@@ -126,15 +129,10 @@ class DockerClient:
         if not ts:
             return None
         try:
-            # examples: 2026-02-19T09:27:16.701781064Z
-            # Python can't parse 9ns digits directly -> truncate to microseconds
             if ts.endswith("Z"):
                 ts = ts[:-1] + "+00:00"
-            # Split fractional seconds if too long
             if "." in ts:
                 head, tail = ts.split(".", 1)
-                # tail contains micro/nano + timezone
-                # Keep 6 digits for microseconds
                 frac = re.findall(r"^\d+", tail)
                 if frac:
                     frac_digits = frac[0][:6].ljust(6, "0")
@@ -155,11 +153,48 @@ class DockerClient:
             out.append(x)
         return out
 
-    def extract_preprocess_titles(self, engine_container: str, tail: int = 2000) -> Dict[str, Any]:
-        """Extract preprocess titles from engine logs.
+    def _clean_preprocess_title(self, rest: str) -> Optional[str]:
+        """Convert 'preprocess:' payload into a clean 'Artist - Title' string.
 
-        Returns titles in chronological order (as they appear in the log tail).
+        Input examples:
+          "1. Daddy Freddy & Tenor Fly - Go Freddy Go.mp3 -> safe_xxx.wav (silence=... LUFS ...)"
+          "derrick_howard_-_behold_i_live_[1973].mp3 -> safe_....wav (...)"
+
+        Output:
+          "Daddy Freddy & Tenor Fly - Go Freddy Go"
+          "derrick howard - behold i live [1973]" (underscores -> spaces)
         """
+        s = (rest or "").strip()
+        if not s:
+            return None
+
+        # Remove leading index "1. "
+        s = self._RE_LEADING_IDX.sub("", s).strip()
+
+        # If it contains "-> safe_xxx.wav", keep only left side
+        if "->" in s:
+            left = s.split("->", 1)[0].strip()
+            s = left
+
+        # Remove trailing parenthetical leftovers (just in case)
+        s = self._RE_PAREN_TRAIL.sub("", s).strip()
+
+        # Keep basename if it's a path
+        s = os.path.basename(s)
+
+        # Remove extension
+        s = self._RE_EXT.sub("", s).strip()
+
+        # Normalize underscores to spaces
+        s = s.replace("_-_", " - ")
+        s = s.replace("_", " ")
+        s = re.sub(r"\s+", " ", s).strip()
+
+        # If still empty, drop
+        return s or None
+
+    def extract_preprocess_titles(self, engine_container: str, tail: int = 2500) -> Dict[str, Any]:
+        """Extract cleaned titles from engine logs 'preprocess:' lines."""
         txt = self.tail_logs(engine_container, tail=tail)
         if not txt or txt.startswith("[control]"):
             return {
@@ -172,14 +207,13 @@ class DockerClient:
 
         titles: List[str] = []
         for line in txt.splitlines():
-            m = self._RE_PREPROCESS_TITLE.search(line)
-            if not m:
-                m = self._RE_PREPROCESS_ANY.search(line)
+            m = self._RE_PREPROCESS.search(line)
             if not m:
                 continue
-            title = (m.group("title") or "").strip()
-            if title:
-                titles.append(title)
+            rest = (m.group("rest") or "").strip()
+            t = self._clean_preprocess_title(rest)
+            if t:
+                titles.append(t)
 
         return {
             "ok": True,
@@ -194,15 +228,13 @@ class DockerClient:
         engine_container: str,
         current_title: Optional[str],
         n: int = 10,
-        tail: int = 2000,
+        tail: int = 2500,
     ) -> Dict[str, Any]:
         """Compute upcoming titles from preprocess logs after current_title.
 
-        Strategy:
-        - collect preprocess titles (chronological)
-        - find LAST occurrence of current_title
-        - take following titles, dedupe (keep order), return first n
-        - if current_title not found: return last n deduped titles (best-effort)
+        - Find LAST occurrence of current_title in the cleaned preprocess sequence
+        - Return the next unique titles (keep order) limited to n
+        - If not found: fallback to last chunk as "best effort"
         """
         data = self.extract_preprocess_titles(engine_container, tail=tail)
         if not data.get("ok"):
@@ -210,21 +242,20 @@ class DockerClient:
 
         titles = data.get("titles") or []
         titles = [t for t in titles if isinstance(t, str) and t.strip()]
-
         if not titles:
             return {"ok": False, "error": "no preprocess titles found", "upcoming": [], "source": "engine_logs"}
 
+        cur = (current_title or "").strip()
         start_idx = None
-        if current_title:
-            # Find last occurrence
+
+        if cur:
             for i in range(len(titles) - 1, -1, -1):
-                if titles[i].strip() == current_title.strip():
+                if titles[i].strip() == cur:
                     start_idx = i + 1
                     break
 
         if start_idx is None:
-            # fallback: take the last chunk as "likely upcoming-ish"
-            chunk = titles[-(n * 3) :]  # a bit larger to dedupe
+            chunk = titles[-(n * 4) :]
             chunk = self._dedupe_keep_order(chunk)
             return {
                 "ok": True,
