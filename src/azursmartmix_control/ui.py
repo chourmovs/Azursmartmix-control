@@ -20,8 +20,8 @@ AZURA_CSS = r"""
   --az-text: rgba(255,255,255,.92);
   --az-muted: rgba(255,255,255,.65);
   --az-green: #22c55e;
-  --az-orange: #f59e0b;
   --az-red: #ef4444;
+  --az-orange: #f59e0b;
   --az-shadow: 0 10px 30px rgba(0,0,0,.25);
   --az-radius: 10px;
   --az-font: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, sans-serif;
@@ -32,13 +32,8 @@ AZURA_CSS = r"""
 
 html, body { background: var(--az-bg) !important; color: var(--az-text) !important; font-family: var(--az-font) !important; }
 .q-page-container, .q-layout, .q-page { background: var(--az-bg) !important; }
+.q-card, .q-table__container, .q-menu, .q-dialog__inner, .q-drawer { background: transparent !important; }
 
-/* kill any default "paper white" panels */
-.q-card, .q-table__container, .q-menu, .q-dialog__inner, .q-drawer {
-  background: transparent !important;
-}
-
-/* Topbar */
 .az-topbar{
   background: linear-gradient(0deg, var(--az-blue) 0%, var(--az-blue-dark) 100%) !important;
   color: white !important;
@@ -48,12 +43,10 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .az-topbar .az-brand { font-weight: 900; }
 .az-topbar .az-sub { opacity: .85; font-weight: 600; }
 
-/* Wrap + grid */
 .az-wrap{ width:100%; max-width: var(--wrap-max); margin: 0 auto; padding: 18px 18px 28px 18px; }
 .az-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: var(--grid-gap); }
 @media (max-width: 1200px){ .az-grid{ grid-template-columns: 1fr; } }
 
-/* Cards */
 .az-card{
   background: var(--az-card) !important;
   border: 1px solid var(--az-border);
@@ -63,6 +56,7 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
   min-width: 520px;
 }
 @media (max-width: 1200px){ .az-card{ min-width: unset; } }
+
 .az-card-h{
   background: var(--az-blue) !important;
   color: white !important;
@@ -72,7 +66,6 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 }
 .az-card-b{ padding: 14px; background: linear-gradient(180deg, var(--az-card2), var(--az-card)); }
 
-/* Badges */
 .az-badge{
   display:inline-flex; align-items:center; gap:8px;
   padding:6px 10px; border-radius:999px;
@@ -85,23 +78,9 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .az-dot.err{ background: var(--az-red); }
 .az-dot.warn{ background: var(--az-orange); }
 
-/* KV */
-.az-kv{ display:grid; grid-template-columns: 140px 1fr; gap: 10px 14px; font-size: 13px; line-height: 1.45; }
-.az-kv .k{ color: var(--az-muted); }
-.az-kv .v{ color: var(--az-text); word-break: break-word; }
-.az-mono{ font-family: var(--az-mono); }
-
-/* Lists */
-.az-list{ display:flex; flex-direction:column; gap:8px; }
-.az-item{ padding: 10px 12px; border-radius: 10px; border: 1px solid var(--az-border); background: rgba(255,255,255,.04); }
-.az-item .idx{ display:inline-block; min-width:24px; font-weight:950; color: rgba(255,255,255,.75); }
-.az-item .txt{ font-weight:650; }
-
-/* Buttons */
 .az-actions .q-btn{ border-radius: 10px !important; font-weight: 900 !important; text-transform:none !important; }
 .az-actions .q-btn--outline{ border:1px solid rgba(255,255,255,.55) !important; color:white !important; }
 
-/* Textarea */
 .az-textarea textarea{
   font-family: var(--az-mono) !important;
   font-size: 12px !important;
@@ -109,11 +88,44 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
   background: rgba(0,0,0,.25) !important;
 }
 
-/* ===== Engine env viewer (no q-table, no white) ===== */
-.env-toolbar{ display:flex; gap:10px; align-items:center; margin-bottom: 10px; }
-.env-search input{
-  font-family: var(--az-mono) !important;
+.az-list{ display:flex; flex-direction:column; gap:8px; }
+.az-item{ padding: 10px 12px; border-radius: 10px; border: 1px solid var(--az-border); background: rgba(255,255,255,.04); }
+.az-item .idx{ display:inline-block; min-width:24px; font-weight:950; color: rgba(255,255,255,.75); }
+.az-item .txt{ font-weight:650; }
+
+/* ===== Runtime tables (real table) ===== */
+.rt-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 900px){ .rt-grid{ grid-template-columns: 1fr; } }
+
+.rt-box{
+  border: 1px solid var(--az-border);
+  border-radius: 10px;
+  background: rgba(0,0,0,.10);
+  overflow: hidden;
 }
+.rt-box-h{
+  padding: 10px 12px;
+  font-weight: 900;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.92);
+}
+.rt-table{
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.rt-table tr td{
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  vertical-align: top;
+}
+.rt-table tr:last-child td{ border-bottom: none; }
+.rt-k{ width: 140px; color: var(--az-muted); }
+.rt-v{ color: rgba(255,255,255,.92); font-family: var(--az-mono); word-break: break-word; }
+
+/* ===== Engine env viewer ===== */
+.env-toolbar{ display:flex; gap:10px; align-items:center; margin-bottom: 10px; }
+.env-search input{ font-family: var(--az-mono) !important; }
 .env-frame{
   max-height: 360px;
   overflow-y: auto;
@@ -146,7 +158,6 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 }
 .env-row:hover{ background: rgba(255,255,255,.05); }
 
-/* scrollbar visible */
 .env-frame::-webkit-scrollbar{ width: 10px; }
 .env-frame::-webkit-scrollbar-track{ background: rgba(255,255,255,.06); border-radius: 10px; }
 .env-frame::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.22); border-radius: 10px; }
@@ -171,18 +182,21 @@ class ControlUI:
         self.timeout = httpx.Timeout(2.5, connect=1.5)
         self._timer = None
 
+        # runtime
         self._docker_badge = None
-        self._engine_kv: Dict[str, Any] = {}
-        self._sched_kv: Dict[str, Any] = {}
+        self._rt_engine_tbl = None
+        self._rt_sched_tbl = None
 
+        # now/upcoming
         self._now_title = None
         self._up_list_container = None
 
-        # env viewer widgets/state
+        # env viewer
         self._env_search = None
         self._env_frame = None
         self._env_rows: List[Tuple[str, str]] = []
 
+        # logs
         self._logs_engine = None
         self._logs_sched = None
 
@@ -222,39 +236,47 @@ class ControlUI:
                     '<span class="az-badge"><span class="az-dot warn"></span><span>Docker: …</span></span>'
                 )
             with ui.element("div").classes("az-card-b"):
-                with ui.row().classes("w-full gap-6"):
-                    self._engine_kv = self._kv_block("Engine")
-                    self._sched_kv = self._kv_block("Scheduler")
+                with ui.element("div").classes("rt-grid"):
+                    self._rt_engine_tbl = self._runtime_box("Engine")
+                    self._rt_sched_tbl = self._runtime_box("Scheduler")
 
-    def _kv_block(self, title: str) -> Dict[str, Any]:
-        with ui.element("div").style("flex:1; min-width: 320px;"):
-            ui.label(title).classes("text-sm font-bold").style("margin-bottom: 10px; opacity:.9;")
-            kv = ui.element("div").classes("az-kv")
-            rows = {"name": ui.html(""), "image": ui.html(""), "status": ui.html(""), "health": ui.html(""), "uptime": ui.html("")}
-            with kv:
-                self._kv_row("name", rows["name"])
-                self._kv_row("image", rows["image"], mono=True)
-                self._kv_row("status", rows["status"])
-                self._kv_row("health", rows["health"])
-                self._kv_row("uptime", rows["uptime"])
-            return rows
+    def _runtime_box(self, title: str):
+        box = ui.element("div").classes("rt-box")
+        with box:
+            ui.element("div").classes("rt-box-h").set_text(title)
+            tbl = ui.html(self._runtime_table_html({}))
+        return tbl
 
-    def _kv_row(self, key: str, value_widget: Any, mono: bool = False) -> None:
-        ui.html(f'<div class="k">{key}</div>')
-        cls = "v az-mono" if mono else "v"
-        value_widget.set_content(f'<div class="{cls}" data-copy="">—</div>')
+    def _runtime_table_html(self, data: Dict[str, Any]) -> str:
+        # expected keys: name, image, status, health, uptime
+        def v(key: str, default: str = "—") -> str:
+            raw = data.get(key)
+            if raw is None or raw == "":
+                raw = default
+            return html.escape(str(raw))
+
+        rows = [
+            ("name", v("name")),
+            ("image", v("image")),
+            ("status", v("status")),
+            ("health", v("health", "-")),
+            ("uptime", v("uptime", "-")),
+        ]
+        tr = "".join(
+            f'<tr><td class="rt-k">{html.escape(k)}</td><td class="rt-v" data-copy="{val}">{val}</td></tr>'
+            for k, val in rows
+        )
+        return f'<table class="rt-table">{tr}</table>'
 
     def _card_env(self) -> None:
         with ui.element("div").classes("az-card"):
             with ui.element("div").classes("az-card-h"):
                 ui.label("Engine env (docker-compose)")
                 ui.label(self.settings.compose_service_engine).classes("text-xs").style("opacity:.85;")
-
             with ui.element("div").classes("az-card-b"):
                 with ui.element("div").classes("env-toolbar"):
                     self._env_search = ui.input(placeholder="Filter (key/value)…").classes("env-search").props("dense outlined")
                     ui.button("Clear", on_click=self._env_clear_filter).props("outline")
-
                 self._env_frame = ui.element("div").classes("env-frame")
 
     def _card_now(self) -> None:
@@ -320,11 +342,22 @@ class ControlUI:
             rt = await self._get_json("/panel/runtime")
         except Exception:
             self._set_docker_badge(ok=False, text="Docker: error")
+            if self._rt_engine_tbl:
+                self._rt_engine_tbl.set_content(self._runtime_table_html({"status": "error"}))
+            if self._rt_sched_tbl:
+                self._rt_sched_tbl.set_content(self._runtime_table_html({"status": "error"}))
             return
+
         docker_ok = bool(rt.get("docker_ping"))
         self._set_docker_badge(ok=docker_ok, text=f"Docker: {'OK' if docker_ok else 'DOWN'}")
-        self._fill_kv(self._engine_kv, rt.get("engine") or {})
-        self._fill_kv(self._sched_kv, rt.get("scheduler") or {})
+
+        eng = rt.get("engine") or {}
+        sch = rt.get("scheduler") or {}
+
+        if self._rt_engine_tbl:
+            self._rt_engine_tbl.set_content(self._runtime_table_html(eng))
+        if self._rt_sched_tbl:
+            self._rt_sched_tbl.set_content(self._runtime_table_html(sch))
 
     def _set_docker_badge(self, ok: bool, text: str) -> None:
         if self._docker_badge is None:
@@ -333,26 +366,6 @@ class ControlUI:
         self._docker_badge.set_content(
             f'<span class="az-badge"><span class="az-dot {dot}"></span><span>{html.escape(text)}</span></span>'
         )
-
-    def _fill_kv(self, kv: Dict[str, Any], data: Dict[str, Any]) -> None:
-        if not kv:
-            return
-        if not data.get("present"):
-            self._set_kv_value(kv["name"], data.get("name") or "missing")
-            self._set_kv_value(kv["image"], "-")
-            self._set_kv_value(kv["status"], "missing")
-            self._set_kv_value(kv["health"], "-")
-            self._set_kv_value(kv["uptime"], "-")
-            return
-        self._set_kv_value(kv["name"], data.get("name") or "—")
-        self._set_kv_value(kv["image"], data.get("image") or "—")
-        self._set_kv_value(kv["status"], data.get("status") or "—")
-        self._set_kv_value(kv["health"], data.get("health") or "-")
-        self._set_kv_value(kv["uptime"], data.get("uptime") or "-")
-
-    def _set_kv_value(self, widget: Any, value: str) -> None:
-        safe = html.escape(value or "—")
-        widget.set_content(f'<div class="v" data-copy="{safe}">{safe}</div>')
 
     async def refresh_engine_env(self) -> None:
         if self._env_frame is None:
@@ -366,7 +379,6 @@ class ControlUI:
                 self._env_rows = [("error", str(data))]
         except Exception as e:
             self._env_rows = [("error", str(e))]
-
         self._render_env()
 
     def _env_clear_filter(self) -> None:
@@ -377,7 +389,6 @@ class ControlUI:
     def _render_env(self) -> None:
         if self._env_frame is None:
             return
-
         q = ""
         if self._env_search:
             q = (self._env_search.value or "").strip().lower()
@@ -391,7 +402,6 @@ class ControlUI:
             if not rows:
                 ui.html('<div style="padding:10px; opacity:.7;">—</div>')
                 return
-
             for k, v in rows:
                 k_e = html.escape(k)
                 v_e = html.escape(v)
