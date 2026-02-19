@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import docker
 from docker.errors import DockerException, NotFound
@@ -21,18 +21,17 @@ class ContainerInfo:
 
 
 class DockerClient:
-    """Minimal Docker wrapper focused on read-only introspection.
+    """Read-only Docker wrapper for control-plane introspection.
 
-    v1 extras:
-    - best-effort current track extraction from engine logs.
+    v1 helpers:
+    - container status summary (with rough age/uptime)
+    - parse engine logs to extract preprocess titles for "upcoming"
     """
 
-    # Example line you showed:
-    # TIMING ... | AFT#1 ENTER cur=file:///tmp/...wav pos=... dur=...
-    _RE_CUR = re.compile(r"\bcur=(?P<cur>\S+)")
-    _RE_NEXT = re.compile(r"\bnext=(?P<next>\S+)")
-    _RE_POS = re.compile(r"\bpos=(?P<pos>[0-9.]+)s")
-    _RE_DUR = re.compile(r"\bdur=(?P<dur>[0-9.]+)")
+    # Your log pattern: "INFO azurmixd.engine - preprocess: <title>"
+    _RE_PREPROCESS_TITLE = re.compile(r"\bpreprocess:\s*(?P<title>.+?)\s*$")
+    # In case some lines use another prefix, keep a tolerant fallback:
+    _RE_PREPROCESS_ANY = re.compile(r"\bpreprocess\b.*?:\s*(?P<title>.+?)\s*$")
 
     def __init__(self) -> None:
         self.client = docker.from_env()
@@ -90,18 +89,25 @@ class DockerClient:
             return f"[control] unexpected error: {e}\n"
 
     def runtime_summary(self, engine_name: str, sched_name: str) -> Dict[str, Any]:
-        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        now = dt.datetime.now(dt.timezone.utc)
         return {
-            "now_utc": now,
+            "now_utc": now.isoformat(),
             "docker_ping": self.ping(),
-            "engine": self._container_info_dict(engine_name),
-            "scheduler": self._container_info_dict(sched_name),
+            "engine": self._container_info_dict(engine_name, now),
+            "scheduler": self._container_info_dict(sched_name, now),
         }
 
-    def _container_info_dict(self, name: str) -> Dict[str, Any]:
+    def _container_info_dict(self, name: str, now: dt.datetime) -> Dict[str, Any]:
         info = self.get_container_info(name)
         if not info:
             return {"name": name, "present": False}
+
+        created_dt = self._parse_docker_ts(info.created_at)
+        started_dt = self._parse_docker_ts(info.started_at)
+
+        age_s = int((now - created_dt).total_seconds()) if created_dt else None
+        uptime_s = int((now - started_dt).total_seconds()) if started_dt else None
+
         return {
             "present": True,
             "name": info.name,
@@ -111,12 +117,48 @@ class DockerClient:
             "health": info.health,
             "created_at": info.created_at,
             "started_at": info.started_at,
+            "age_s": age_s,
+            "uptime_s": uptime_s,
         }
 
-    def best_effort_now_playing_from_logs(self, engine_container: str, tail: int = 600) -> Dict[str, Any]:
-        """Parse engine logs to infer current track (read-only heuristic).
+    @staticmethod
+    def _parse_docker_ts(ts: Optional[str]) -> Optional[dt.datetime]:
+        if not ts:
+            return None
+        try:
+            # examples: 2026-02-19T09:27:16.701781064Z
+            # Python can't parse 9ns digits directly -> truncate to microseconds
+            if ts.endswith("Z"):
+                ts = ts[:-1] + "+00:00"
+            # Split fractional seconds if too long
+            if "." in ts:
+                head, tail = ts.split(".", 1)
+                # tail contains micro/nano + timezone
+                # Keep 6 digits for microseconds
+                frac = re.findall(r"^\d+", tail)
+                if frac:
+                    frac_digits = frac[0][:6].ljust(6, "0")
+                    rest = tail[len(frac[0]) :]
+                    ts = f"{head}.{frac_digits}{rest}"
+            return dt.datetime.fromisoformat(ts)
+        except Exception:
+            return None
 
-        We look for the last line containing `cur=...` (your TIMING/AFT lines).
+    @staticmethod
+    def _dedupe_keep_order(items: List[str]) -> List[str]:
+        seen = set()
+        out: List[str] = []
+        for x in items:
+            if x in seen:
+                continue
+            seen.add(x)
+            out.append(x)
+        return out
+
+    def extract_preprocess_titles(self, engine_container: str, tail: int = 2000) -> Dict[str, Any]:
+        """Extract preprocess titles from engine logs.
+
+        Returns titles in chronological order (as they appear in the log tail).
         """
         txt = self.tail_logs(engine_container, tail=tail)
         if not txt or txt.startswith("[control]"):
@@ -125,45 +167,79 @@ class DockerClient:
                 "source": "engine_logs",
                 "engine_container": engine_container,
                 "error": txt.strip() if txt else "empty logs",
+                "titles": [],
             }
 
-        last_cur = None
-        last_next = None
-        last_pos = None
-        last_dur = None
-        last_line = None
-
+        titles: List[str] = []
         for line in txt.splitlines():
-            m = self._RE_CUR.search(line)
-            if m:
-                last_cur = m.group("cur")
-                last_line = line
-                mpos = self._RE_POS.search(line)
-                if mpos:
-                    last_pos = mpos.group("pos")
-                mdur = self._RE_DUR.search(line)
-                if mdur:
-                    last_dur = mdur.group("dur")
-
-            mn = self._RE_NEXT.search(line)
-            if mn:
-                last_next = mn.group("next")
-
-        if not last_cur:
-            return {
-                "ok": False,
-                "source": "engine_logs",
-                "engine_container": engine_container,
-                "error": "no `cur=` pattern found in tail",
-            }
+            m = self._RE_PREPROCESS_TITLE.search(line)
+            if not m:
+                m = self._RE_PREPROCESS_ANY.search(line)
+            if not m:
+                continue
+            title = (m.group("title") or "").strip()
+            if title:
+                titles.append(title)
 
         return {
             "ok": True,
             "source": "engine_logs",
             "engine_container": engine_container,
-            "current_uri": last_cur,
-            "position_s": float(last_pos) if last_pos is not None else None,
-            "duration_s": float(last_dur) if last_dur is not None else None,
-            "last_next_uri_seen": last_next,
-            "evidence": last_line,
+            "titles": titles,
+            "count": len(titles),
+        }
+
+    def compute_upcoming_from_preprocess(
+        self,
+        engine_container: str,
+        current_title: Optional[str],
+        n: int = 10,
+        tail: int = 2000,
+    ) -> Dict[str, Any]:
+        """Compute upcoming titles from preprocess logs after current_title.
+
+        Strategy:
+        - collect preprocess titles (chronological)
+        - find LAST occurrence of current_title
+        - take following titles, dedupe (keep order), return first n
+        - if current_title not found: return last n deduped titles (best-effort)
+        """
+        data = self.extract_preprocess_titles(engine_container, tail=tail)
+        if not data.get("ok"):
+            return {"ok": False, "error": data.get("error"), "upcoming": [], "source": "engine_logs"}
+
+        titles = data.get("titles") or []
+        titles = [t for t in titles if isinstance(t, str) and t.strip()]
+
+        if not titles:
+            return {"ok": False, "error": "no preprocess titles found", "upcoming": [], "source": "engine_logs"}
+
+        start_idx = None
+        if current_title:
+            # Find last occurrence
+            for i in range(len(titles) - 1, -1, -1):
+                if titles[i].strip() == current_title.strip():
+                    start_idx = i + 1
+                    break
+
+        if start_idx is None:
+            # fallback: take the last chunk as "likely upcoming-ish"
+            chunk = titles[-(n * 3) :]  # a bit larger to dedupe
+            chunk = self._dedupe_keep_order(chunk)
+            return {
+                "ok": True,
+                "source": "engine_logs_fallback_tail",
+                "current_title_found": False,
+                "current_title": current_title,
+                "upcoming": chunk[:n],
+            }
+
+        chunk2 = titles[start_idx:]
+        chunk2 = self._dedupe_keep_order(chunk2)
+        return {
+            "ok": True,
+            "source": "engine_logs_after_current",
+            "current_title_found": True,
+            "current_title": current_title,
+            "upcoming": chunk2[:n],
         }
