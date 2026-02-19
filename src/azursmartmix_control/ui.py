@@ -9,7 +9,11 @@ from azursmartmix_control.config import Settings
 
 
 class ControlUI:
-    """NiceGUI frontend that consumes the local FastAPI endpoints."""
+    """NiceGUI frontend that consumes the local FastAPI endpoints.
+
+    Notes (NiceGUI json_editor):
+    - To change displayed JSON, mutate editor.properties then call editor.update() (no args).
+    """
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -87,6 +91,14 @@ class ControlUI:
 
         ui.timer(0.1, self.refresh_all, once=True)
 
+    def _set_json(self, editor: Any, payload: Dict[str, Any]) -> None:
+        """Update NiceGUI JsonEditor content safely."""
+        if editor is None:
+            return
+        # JsonEditor expects properties['content'] with either {'json': ...} or {'text': ...}
+        editor.properties["content"] = {"json": payload}
+        editor.update()
+
     async def _get_json(self, path: str) -> Dict[str, Any]:
         url = f"http://127.0.0.1:{self.settings.ui_port}{self.api_base}{path}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -113,11 +125,11 @@ class ControlUI:
         try:
             data = await self._get_json("/status")
             self.status_data = data
-            self._json_status.update({"content": {"json": data}})
+            self._set_json(self._json_status, data)
             self._update_badges(data)
         except Exception as e:
             err = {"error": str(e)}
-            self._json_status.update({"content": {"json": err}})
+            self._set_json(self._json_status, err)
             if self._lbl_docker:
                 self._lbl_docker.set_text("Docker: error").props("color=red")
 
@@ -125,40 +137,44 @@ class ControlUI:
         try:
             data = await self._get_json("/config")
             self.config_data = data
-            self._json_config.update({"content": {"json": data}})
+            self._set_json(self._json_config, data)
         except Exception as e:
-            self._json_config.update({"content": {"json": {"error": str(e)}}})
+            self._set_json(self._json_config, {"error": str(e)})
 
     async def refresh_now_upcoming(self) -> None:
         try:
             now = await self._get_json("/scheduler/now")
             self.now_data = now
-            self._json_now.update({"content": {"json": now}})
+            self._set_json(self._json_now, now)
         except Exception as e:
-            self._json_now.update({"content": {"json": {"error": str(e)}}})
+            self._set_json(self._json_now, {"error": str(e)})
 
         try:
             up = await self._get_json("/scheduler/upcoming?n=10")
             self.upcoming_data = up
-            self._json_upcoming.update({"content": {"json": up}})
+            self._set_json(self._json_upcoming, up)
         except Exception as e:
-            self._json_upcoming.update({"content": {"json": {"error": str(e)}}})
+            self._set_json(self._json_upcoming, {"error": str(e)})
 
     async def refresh_engine_logs(self) -> None:
         try:
             txt = await self._get_text("/logs?service=engine")
             self.logs_engine = txt
-            self._logs_engine_box.set_value(txt)
+            if self._logs_engine_box:
+                self._logs_engine_box.set_value(txt)
         except Exception as e:
-            self._logs_engine_box.set_value(f"[ui] error fetching engine logs: {e}\n")
+            if self._logs_engine_box:
+                self._logs_engine_box.set_value(f"[ui] error fetching engine logs: {e}\n")
 
     async def refresh_scheduler_logs(self) -> None:
         try:
             txt = await self._get_text("/logs?service=scheduler")
             self.logs_sched = txt
-            self._logs_sched_box.set_value(txt)
+            if self._logs_sched_box:
+                self._logs_sched_box.set_value(txt)
         except Exception as e:
-            self._logs_sched_box.set_value(f"[ui] error fetching scheduler logs: {e}\n")
+            if self._logs_sched_box:
+                self._logs_sched_box.set_value(f"[ui] error fetching scheduler logs: {e}\n")
 
     def _update_badges(self, data: Dict[str, Any]) -> None:
         docker_ok = bool(data.get("docker_ping"))
@@ -175,9 +191,7 @@ class ControlUI:
                 return f"{label}: missing"
             st = x.get("status") or "unknown"
             hl = x.get("health")
-            if hl:
-                return f"{label}: {st} / health={hl}"
-            return f"{label}: {st}"
+            return f"{label}: {st} / health={hl}" if hl else f"{label}: {st}"
 
         if self._lbl_engine:
             present = bool(eng.get("present"))
