@@ -39,17 +39,13 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .q-page-container, .q-layout, .q-page { background: var(--az-bg) !important; }
 .q-card, .q-table__container, .q-menu, .q-dialog__inner, .q-drawer { background: transparent !important; }
 
-/* Nuke Quasar panel/tabs backgrounds (the real culprit) */
+/* Nuke Quasar panel/tabs backgrounds */
 .q-tab-panels,
 .q-tab-panel,
 .q-panel,
 .q-panel-parent,
-.q-tab__content,
-.q-tab__label,
-.q-tab__indicator,
 .q-tabs,
 .q-tabs__content,
-.q-tabs__content--align-justify,
 .q-tab-panels .q-panel,
 .q-tab-panels .q-panel-parent {
   background: transparent !important;
@@ -179,20 +175,17 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .env-frame::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.22); border-radius: 10px; }
 .env-frame::-webkit-scrollbar-thumb:hover{ background: rgba(255,255,255,.34); }
 
-/* ===== Console viewer (no PRE, no light background possible) ===== */
+/* ===== Console viewer ===== */
 .console-frame{
   height: 420px;
   overflow: auto;
   border: 1px solid var(--az-border);
   border-radius: 10px;
-  background: rgba(0,0,0,.55) !important;  /* explicit dark */
+  background: rgba(0,0,0,.55) !important;
   padding: 10px 12px;
 }
-
-/* Hard kill any inherited background inside the console */
 .console-frame, .console-frame * { background: transparent !important; }
 .console-frame { background: rgba(0,0,0,.55) !important; }
-
 .console-content{
   font-family: var(--az-mono) !important;
   font-size: 12px !important;
@@ -213,6 +206,28 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .t-vio{  color: rgba(167, 139, 250, .95) !important; }
 .t-cyan{ color: rgba(34, 211, 238, .95) !important; }
 .t-bold{ font-weight: 900 !important; }
+
+/* ===== HTML5 audio player ===== */
+.az-player{
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--az-border);
+  background: rgba(0,0,0,.22);
+}
+.az-player audio{
+  width: 100%;
+  height: 42px;
+  filter: invert(1) hue-rotate(180deg) saturate(1.2); /* make native controls "dark-ish" */
+  opacity: 0.95;
+}
+.az-player .hint{
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(255,255,255,.65);
+  font-family: var(--az-mono);
+}
 """
 
 AZURA_JS = r"""
@@ -238,6 +253,8 @@ class ControlUI:
         self._rt_sched_tbl = None
 
         self._now_title = None
+        self._now_player = None
+
         self._up_list_container = None
 
         self._env_search = None
@@ -246,6 +263,20 @@ class ControlUI:
 
         self._log_html_engine = None
         self._log_html_sched = None
+
+    def _stream_public_url(self) -> str:
+        # Prefer explicit env var if present in Settings (backward-compatible if not)
+        public = getattr(self.settings, "icecast_public_url", "") or ""
+        public = str(public).strip()
+        if public:
+            return public.rstrip("/")
+        scheme = getattr(self.settings, "icecast_scheme", "http")
+        host = getattr(self.settings, "icecast_host", "localhost")
+        port = getattr(self.settings, "icecast_port", 8000)
+        mount = getattr(self.settings, "icecast_mount", "/")
+        if not str(mount).startswith("/"):
+            mount = "/" + str(mount)
+        return f"{scheme}://{host}:{port}{mount}"
 
     def build(self) -> None:
         ui.add_head_html(f"<style>{AZURA_CSS}</style>")
@@ -325,13 +356,30 @@ class ControlUI:
                 self._env_frame = ui.element("div").classes("env-frame")
 
     def _card_now(self) -> None:
+        stream_url = self._stream_public_url()
+        mount = getattr(self.settings, "icecast_mount", "/gst-test.mp3")
         with ui.element("div").classes("az-card"):
             with ui.element("div").classes("az-card-h"):
                 ui.label("Now Playing")
-                ui.label(self.settings.icecast_mount).classes("text-xs").style("opacity:.85;")
+                ui.label(str(mount)).classes("text-xs").style("opacity:.85;")
             with ui.element("div").classes("az-card-b"):
-                self._now_title = ui.label("—").classes("text-xl").style("font-weight: 950; margin: 2px 0 6px 0;")
-                ui.label("Icecast metadata (title only)").style("font-size: 12px; opacity:.7;")
+                self._now_title = ui.label("—").classes("text-xl").style("font-weight: 950; margin: 2px 0 0 0;")
+
+                # HTML5 player
+                self._now_player = ui.html(self._player_html(stream_url))
+
+                ui.label("Icecast metadata (title only)").style("font-size: 12px; opacity:.7; margin-top: 10px;")
+
+    def _player_html(self, url: str) -> str:
+        u = html.escape(url)
+        return (
+            f'<div class="az-player">'
+            f'  <audio controls preload="none" crossorigin="anonymous">'
+            f'    <source src="{u}" type="audio/mpeg" />'
+            f'  </audio>'
+            f'  <div class="hint" data-copy="{u}">{u}</div>'
+            f'</div>'
+        )
 
     def _card_upcoming(self) -> None:
         with ui.element("div").classes("az-card"):
