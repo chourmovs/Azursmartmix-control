@@ -1,36 +1,42 @@
 services:
   control:
-    build: .
     image: chourmovs/azursmartmix-control:latest
     container_name: azursmartmix_control
     environment:
-      # Where the scheduler API lives (inside docker network)
       SCHED_BASE_URL: "http://azursmartmix_scheduler:8001"
-
-      # Target container names (adjust if yours differ)
       ENGINE_CONTAINER: "azursmartmix_engine"
       SCHEDULER_CONTAINER: "azursmartmix_scheduler"
-
-      # Optional config file to expose read-only
-      CONFIG_PATH: "/config/config.yml"
-
-      # UI & API ports
       UI_HOST: "0.0.0.0"
       UI_PORT: "8088"
       API_PREFIX: "/api"
-
-      # Logs tail limits
       LOG_TAIL_LINES_DEFAULT: "400"
       LOG_TAIL_LINES_MAX: "2000"
+
+      COMPOSE_PATH: "/compose/docker-compose.yml"
+      COMPOSE_SERVICE_ENGINE: "azursmartmix_engine"
+      COMPOSE_SERVICE_SCHEDULER: "azursmartmix_scheduler"
+      
+      ICECAST_PUBLIC_URL: "http://chourmovs.ddnsfree.com:8000/gst-test.mp3"
+      ICECAST_HOST: "web"
+      ICECAST_PORT: "8000"
+      ICECAST_MOUNT: "/gst-test.mp3"
+      ICECAST_SCHEME: "http"
+      ICECAST_STATUS_PATH: "/status-json.xsl"
 
     ports:
       - "8088:8088"
 
     volumes:
-      # Docker socket read-only (status + logs)
       - /var/run/docker.sock:/var/run/docker.sock:ro
-
-      # Optional runtime config RO
       - ./config/config.yml:/config/config.yml:ro
+      - ../docker-compose.yml:/compose/docker-compose.yml:ro
+
+    networks:
+      - azursmartmix_net
 
     restart: unless-stopped
+
+networks:
+  azursmartmix_net:
+    external: true
+    name: azuracast_default
