@@ -1,15 +1,38 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from azursmartmix_control.config import Settings
 from azursmartmix_control.docker_client import DockerClient
 from azursmartmix_control.scheduler_client import SchedulerClient
+
+
+def _read_text_file(path: str, max_bytes: int = 256_000) -> Dict[str, Any]:
+    """Read file as text (best-effort), bounded for safety."""
+    if not path:
+        return {"present": False, "path": path, "raw_text": None, "error": "empty path"}
+
+    if not os.path.exists(path):
+        return {"present": False, "path": path, "raw_text": None, "error": "not found"}
+
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(max_bytes + 1)
+        truncated = len(raw) > max_bytes
+        if truncated:
+            raw = raw[:max_bytes]
+        try:
+            txt = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            txt = raw.decode("utf-8", errors="replace")
+        return {"present": True, "path": path, "raw_text": txt, "truncated": truncated, "error": None}
+    except Exception as e:
+        return {"present": True, "path": path, "raw_text": None, "error": f"read failed: {e}"}
 
 
 def create_api(settings: Settings) -> FastAPI:
@@ -29,16 +52,47 @@ def create_api(settings: Settings) -> FastAPI:
 
     @app.get("/config")
     def read_config() -> Dict[str, Any]:
-        path = settings.config_path
-        if not path or not os.path.exists(path):
-            return {"present": False, "path": path, "data": None}
+        """
+        Read config.yml in read-only mode.
 
+        Important: never 500 in v1.
+        - returns parse_ok=false + raw_text + error when YAML is invalid
+        """
+        base = _read_text_file(settings.config_path)
+        if not base.get("present") or base.get("raw_text") is None:
+            # missing or unreadable -> still 200 with diagnostics
+            return {
+                "present": bool(base.get("present")),
+                "path": base.get("path"),
+                "parse_ok": False,
+                "data": None,
+                "raw_text": base.get("raw_text"),
+                "error": base.get("error"),
+                "truncated": base.get("truncated", False),
+            }
+
+        raw_text = base["raw_text"]
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            return {"present": True, "path": path, "data": data}
+            data = yaml.safe_load(raw_text)  # dict/list/None
+            return {
+                "present": True,
+                "path": base.get("path"),
+                "parse_ok": True,
+                "data": data,
+                "raw_text": raw_text,
+                "error": None,
+                "truncated": base.get("truncated", False),
+            }
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to read YAML: {e}")
+            return {
+                "present": True,
+                "path": base.get("path"),
+                "parse_ok": False,
+                "data": None,
+                "raw_text": raw_text,
+                "error": f"YAML parse error: {e}",
+                "truncated": base.get("truncated", False),
+            }
 
     @app.get("/logs", response_class=PlainTextResponse)
     def logs(
@@ -64,12 +118,19 @@ def create_api(settings: Settings) -> FastAPI:
 
     @app.get("/scheduler/now")
     async def scheduler_now() -> JSONResponse:
+        # This stays best-effort: your scheduler returns 404 on now endpoints, so we'll report a note.
         data = await sched.now_playing()
         return JSONResponse(data)
 
     @app.get("/scheduler/upcoming")
     async def scheduler_upcoming(n: int = Query(10, ge=1, le=50)) -> JSONResponse:
         data = await sched.upcoming(n=n)
+        return JSONResponse(data)
+
+    @app.get("/now_playing")
+    def now_playing() -> JSONResponse:
+        """Best-effort now playing inferred from engine logs."""
+        data = docker_client.best_effort_now_playing_from_logs(settings.engine_container)
         return JSONResponse(data)
 
     return app
