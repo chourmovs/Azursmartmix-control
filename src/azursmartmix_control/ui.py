@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
+import html
 import httpx
 from nicegui import ui
 
@@ -13,13 +14,11 @@ AZURA_CSS = r"""
   --az-blue: #1e88e5;
   --az-blue-dark: #1565c0;
   --az-bg: #1f242d;
-  --az-bg2: #262c37;
   --az-card: #262c37;
   --az-card2: #2b3340;
   --az-border: rgba(255,255,255,.08);
   --az-text: rgba(255,255,255,.92);
   --az-muted: rgba(255,255,255,.65);
-  --az-muted2: rgba(255,255,255,.45);
   --az-green: #22c55e;
   --az-orange: #f59e0b;
   --az-red: #ef4444;
@@ -27,184 +26,131 @@ AZURA_CSS = r"""
   --az-radius: 10px;
   --az-font: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, sans-serif;
   --az-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-
-  /* sizing knobs */
-  --wrap-max: 1860px;  /* ~x1.5 vs 1240 */
+  --wrap-max: 1860px;
   --grid-gap: 18px;
 }
 
-html, body {
-  background: var(--az-bg) !important;
-  color: var(--az-text) !important;
-  font-family: var(--az-font) !important;
-}
+html, body { background: var(--az-bg) !important; color: var(--az-text) !important; font-family: var(--az-font) !important; }
 .q-page-container, .q-layout, .q-page { background: var(--az-bg) !important; }
 
+/* kill any default "paper white" panels */
+.q-card, .q-table__container, .q-menu, .q-dialog__inner, .q-drawer {
+  background: transparent !important;
+}
+
 /* Topbar */
-.az-topbar {
+.az-topbar{
   background: linear-gradient(0deg, var(--az-blue) 0%, var(--az-blue-dark) 100%) !important;
   color: white !important;
   border-bottom: 1px solid rgba(255,255,255,.15);
   box-shadow: var(--az-shadow);
 }
-.az-topbar .az-brand { font-weight: 900; letter-spacing: .2px; }
+.az-topbar .az-brand { font-weight: 900; }
 .az-topbar .az-sub { opacity: .85; font-weight: 600; }
 
-/* Main container (wider) */
-.az-wrap {
-  width: 100%;
-  max-width: var(--wrap-max);
-  margin: 0 auto;
-  padding: 18px 18px 28px 18px;
-}
-
-/* Grid 2 columns */
-.az-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--grid-gap);
-}
-@media (max-width: 1200px){
-  .az-grid { grid-template-columns: 1fr; }
-}
+/* Wrap + grid */
+.az-wrap{ width:100%; max-width: var(--wrap-max); margin: 0 auto; padding: 18px 18px 28px 18px; }
+.az-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: var(--grid-gap); }
+@media (max-width: 1200px){ .az-grid{ grid-template-columns: 1fr; } }
 
 /* Cards */
-.az-card {
+.az-card{
   background: var(--az-card) !important;
   border: 1px solid var(--az-border);
   border-radius: var(--az-radius);
   box-shadow: var(--az-shadow);
   overflow: hidden;
-  min-width: 520px; /* makes columns feel wider on large screens */
+  min-width: 520px;
 }
-@media (max-width: 1200px){
-  .az-card { min-width: unset; }
-}
-.az-card-h {
+@media (max-width: 1200px){ .az-card{ min-width: unset; } }
+.az-card-h{
   background: var(--az-blue) !important;
   color: white !important;
   padding: 12px 14px;
   font-weight: 900;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display:flex; align-items:center; justify-content:space-between;
 }
-.az-card-b {
-  padding: 14px;
-  background: linear-gradient(180deg, var(--az-card2), var(--az-card));
-}
+.az-card-b{ padding: 14px; background: linear-gradient(180deg, var(--az-card2), var(--az-card)); }
 
-/* Mini badges */
-.az-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-weight: 800;
-  font-size: 12px;
-  border: 1px solid var(--az-border);
+/* Badges */
+.az-badge{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:6px 10px; border-radius:999px;
+  font-weight:900; font-size:12px;
+  border:1px solid var(--az-border);
   background: rgba(255,255,255,.05);
 }
-.az-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
-.az-dot.ok { background: var(--az-green); }
-.az-dot.warn { background: var(--az-orange); }
-.az-dot.err { background: var(--az-red); }
+.az-dot{ width:10px; height:10px; border-radius:999px; display:inline-block; }
+.az-dot.ok{ background: var(--az-green); }
+.az-dot.err{ background: var(--az-red); }
+.az-dot.warn{ background: var(--az-orange); }
 
-.az-kv {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: 10px 14px;
-  font-size: 13px;
-  line-height: 1.45;
-}
-.az-kv .k { color: var(--az-muted); }
-.az-kv .v { color: var(--az-text); word-break: break-word; }
-.az-mono { font-family: var(--az-mono); }
+/* KV */
+.az-kv{ display:grid; grid-template-columns: 140px 1fr; gap: 10px 14px; font-size: 13px; line-height: 1.45; }
+.az-kv .k{ color: var(--az-muted); }
+.az-kv .v{ color: var(--az-text); word-break: break-word; }
+.az-mono{ font-family: var(--az-mono); }
 
-.az-now-title { font-size: 20px; font-weight: 950; margin: 2px 0 6px 0; }
-.az-small { color: var(--az-muted); font-size: 12px; }
-
-.az-list { display: flex; flex-direction: column; gap: 8px; }
-.az-item {
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--az-border);
-  background: rgba(255,255,255,.04);
-}
-.az-item .idx { display: inline-block; min-width: 24px; font-weight: 950; color: rgba(255,255,255,.75); }
-.az-item .txt { font-weight: 650; }
+/* Lists */
+.az-list{ display:flex; flex-direction:column; gap:8px; }
+.az-item{ padding: 10px 12px; border-radius: 10px; border: 1px solid var(--az-border); background: rgba(255,255,255,.04); }
+.az-item .idx{ display:inline-block; min-width:24px; font-weight:950; color: rgba(255,255,255,.75); }
+.az-item .txt{ font-weight:650; }
 
 /* Buttons */
-.az-actions .q-btn {
-  border-radius: 10px !important;
-  font-weight: 900 !important;
-  text-transform: none !important;
-}
-.az-actions .q-btn--outline {
-  border: 1px solid rgba(255,255,255,.55) !important;
-  color: white !important;
-}
+.az-actions .q-btn{ border-radius: 10px !important; font-weight: 900 !important; text-transform:none !important; }
+.az-actions .q-btn--outline{ border:1px solid rgba(255,255,255,.55) !important; color:white !important; }
 
-/* Logs textarea */
-.az-textarea textarea {
+/* Textarea */
+.az-textarea textarea{
   font-family: var(--az-mono) !important;
   font-size: 12px !important;
   color: rgba(255,255,255,.90) !important;
   background: rgba(0,0,0,.25) !important;
 }
 
-/* ========== Dark table overrides (kill white backgrounds) ========== */
-.az-table .q-table__container{
-  background: rgba(0,0,0,.18) !important;
-  border: 1px solid var(--az-border) !important;
-  border-radius: 10px !important;
+/* ===== Engine env viewer (no q-table, no white) ===== */
+.env-toolbar{ display:flex; gap:10px; align-items:center; margin-bottom: 10px; }
+.env-search input{
+  font-family: var(--az-mono) !important;
+}
+.env-frame{
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 6px;
+  border: 1px solid var(--az-border);
+  border-radius: 10px;
+  background: rgba(0,0,0,.12);
+}
+.env-row{
+  display:grid;
+  grid-template-columns: 260px 1fr;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.env-row:last-child{ border-bottom: none; }
+.env-k{
+  font-family: var(--az-mono);
+  font-size: 12px;
+  color: rgba(255,255,255,.80);
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
-
-/* Make the internal scroll container dark as well */
-.az-table .q-table__middle,
-.az-table .q-virtual-scroll__content,
-.az-table .q-table__middle.scroll,
-.az-table .q-table__middle div,
-.az-table .q-table__grid-content {
-  background: transparent !important;
+.env-v{
+  font-family: var(--az-mono);
+  font-size: 12px;
+  color: rgba(255,255,255,.92);
+  word-break: break-word;
 }
+.env-row:hover{ background: rgba(255,255,255,.05); }
 
-/* Header sticky + dark */
-.az-table thead tr th{
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: rgba(0,0,0,.28) !important;
-  color: rgba(255,255,255,.86) !important;
-  border-bottom: 1px solid var(--az-border) !important;
-}
-
-/* Cells dark */
-.az-table tbody tr td{
-  background: transparent !important;
-  color: rgba(255,255,255,.90) !important;
-  border-bottom: 1px solid rgba(255,255,255,.06) !important;
-}
-
-/* Remove hover white flash */
-.az-table tbody tr:hover td{
-  background: rgba(255,255,255,.05) !important;
-}
-
-/* ========== Engine env frame: fixed height + visible scrollbar ========== */
-.env-frame {
-  max-height: 360px;       /* limit height */
-  overflow-y: auto;        /* internal scroll */
-  padding-right: 6px;      /* room for scrollbar */
-}
-
-/* make scrollbar visible (webkit) */
-.env-frame::-webkit-scrollbar { width: 10px; }
-.env-frame::-webkit-scrollbar-track { background: rgba(255,255,255,.06); border-radius: 10px; }
-.env-frame::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); border-radius: 10px; }
-.env-frame::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.34); }
+/* scrollbar visible */
+.env-frame::-webkit-scrollbar{ width: 10px; }
+.env-frame::-webkit-scrollbar-track{ background: rgba(255,255,255,.06); border-radius: 10px; }
+.env-frame::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.22); border-radius: 10px; }
+.env-frame::-webkit-scrollbar-thumb:hover{ background: rgba(255,255,255,.34); }
 """
 
 AZURA_JS = r"""
@@ -226,13 +172,16 @@ class ControlUI:
         self._timer = None
 
         self._docker_badge = None
-        self._engine_kv = {}
-        self._sched_kv = {}
+        self._engine_kv: Dict[str, Any] = {}
+        self._sched_kv: Dict[str, Any] = {}
 
         self._now_title = None
         self._up_list_container = None
 
-        self._env_table = None
+        # env viewer widgets/state
+        self._env_search = None
+        self._env_frame = None
+        self._env_rows: List[Tuple[str, str]] = []
 
         self._logs_engine = None
         self._logs_sched = None
@@ -263,7 +212,7 @@ class ControlUI:
 
         ui.timer(0.1, self.refresh_all, once=True)
 
-    # ---- Cards ----
+    # ---------- Cards ----------
 
     def _card_runtime(self) -> None:
         with ui.element("div").classes("az-card"):
@@ -281,13 +230,7 @@ class ControlUI:
         with ui.element("div").style("flex:1; min-width: 320px;"):
             ui.label(title).classes("text-sm font-bold").style("margin-bottom: 10px; opacity:.9;")
             kv = ui.element("div").classes("az-kv")
-            rows = {
-                "name": ui.html(""),
-                "image": ui.html(""),
-                "status": ui.html(""),
-                "health": ui.html(""),
-                "uptime": ui.html(""),
-            }
+            rows = {"name": ui.html(""), "image": ui.html(""), "status": ui.html(""), "health": ui.html(""), "uptime": ui.html("")}
             with kv:
                 self._kv_row("name", rows["name"])
                 self._kv_row("image", rows["image"], mono=True)
@@ -307,17 +250,12 @@ class ControlUI:
                 ui.label("Engine env (docker-compose)")
                 ui.label(self.settings.compose_service_engine).classes("text-xs").style("opacity:.85;")
 
-            # IMPORTANT: put the table inside a scrollable frame
-            with ui.element("div").classes("az-card-b env-frame"):
-                self._env_table = ui.table(
-                    columns=[
-                        {"name": "key", "label": "KEY", "field": "key", "align": "left"},
-                        {"name": "value", "label": "VALUE", "field": "value", "align": "left"},
-                    ],
-                    rows=[],
-                    row_key="key",
-                ).classes("w-full az-table")
-                self._env_table.props("dense flat")
+            with ui.element("div").classes("az-card-b"):
+                with ui.element("div").classes("env-toolbar"):
+                    self._env_search = ui.input(placeholder="Filter (key/value)…").classes("env-search").props("dense outlined")
+                    ui.button("Clear", on_click=self._env_clear_filter).props("outline")
+
+                self._env_frame = ui.element("div").classes("env-frame")
 
     def _card_now(self) -> None:
         with ui.element("div").classes("az-card"):
@@ -325,8 +263,8 @@ class ControlUI:
                 ui.label("Now Playing")
                 ui.label(self.settings.icecast_mount).classes("text-xs").style("opacity:.85;")
             with ui.element("div").classes("az-card-b"):
-                self._now_title = ui.label("—").classes("az-now-title")
-                ui.label("Icecast metadata (title only)").classes("az-small")
+                self._now_title = ui.label("—").classes("text-xl").style("font-weight: 950; margin: 2px 0 6px 0;")
+                ui.label("Icecast metadata (title only)").style("font-size: 12px; opacity:.7;")
 
     def _card_upcoming(self) -> None:
         with ui.element("div").classes("az-card"):
@@ -345,14 +283,13 @@ class ControlUI:
                 tabs = ui.tabs().classes("w-full")
                 t_engine = ui.tab("engine")
                 t_sched = ui.tab("scheduler")
-
                 with ui.tab_panels(tabs, value=t_engine).classes("w-full"):
                     with ui.tab_panel(t_engine):
                         self._logs_engine = ui.textarea(value="").props("readonly rows=16").classes("w-full az-textarea")
                     with ui.tab_panel(t_sched):
                         self._logs_sched = ui.textarea(value="").props("readonly rows=16").classes("w-full az-textarea")
 
-    # ---- HTTP helpers ----
+    # ---------- HTTP helpers ----------
 
     async def _get_json(self, path: str) -> Dict[str, Any]:
         url = f"http://127.0.0.1:{self.settings.ui_port}{self.api_base}{path}"
@@ -369,7 +306,7 @@ class ControlUI:
             r.raise_for_status()
             return r.text
 
-    # ---- Refresh cycle ----
+    # ---------- Refresh ----------
 
     async def refresh_all(self) -> None:
         await self.refresh_runtime()
@@ -384,10 +321,8 @@ class ControlUI:
         except Exception:
             self._set_docker_badge(ok=False, text="Docker: error")
             return
-
         docker_ok = bool(rt.get("docker_ping"))
         self._set_docker_badge(ok=docker_ok, text=f"Docker: {'OK' if docker_ok else 'DOWN'}")
-
         self._fill_kv(self._engine_kv, rt.get("engine") or {})
         self._fill_kv(self._sched_kv, rt.get("scheduler") or {})
 
@@ -396,7 +331,7 @@ class ControlUI:
             return
         dot = "ok" if ok else "err"
         self._docker_badge.set_content(
-            f'<span class="az-badge"><span class="az-dot {dot}"></span><span>{text}</span></span>'
+            f'<span class="az-badge"><span class="az-dot {dot}"></span><span>{html.escape(text)}</span></span>'
         )
 
     def _fill_kv(self, kv: Dict[str, Any], data: Dict[str, Any]) -> None:
@@ -409,7 +344,6 @@ class ControlUI:
             self._set_kv_value(kv["health"], "-")
             self._set_kv_value(kv["uptime"], "-")
             return
-
         self._set_kv_value(kv["name"], data.get("name") or "—")
         self._set_kv_value(kv["image"], data.get("image") or "—")
         self._set_kv_value(kv["status"], data.get("status") or "—")
@@ -417,30 +351,61 @@ class ControlUI:
         self._set_kv_value(kv["uptime"], data.get("uptime") or "-")
 
     def _set_kv_value(self, widget: Any, value: str) -> None:
-        safe = (value or "—").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        safe = html.escape(value or "—")
         widget.set_content(f'<div class="v" data-copy="{safe}">{safe}</div>')
 
     async def refresh_engine_env(self) -> None:
-        if self._env_table is None:
+        if self._env_frame is None:
             return
         try:
             data = await self._get_json("/panel/engine_env")
             env = data.get("environment") if isinstance(data, dict) else None
-            if not isinstance(env, dict):
-                rows = [{"key": "error", "value": str(data)}]
+            if isinstance(env, dict):
+                self._env_rows = [(k, str(env.get(k, ""))) for k in sorted(env.keys())]
             else:
-                rows = [{"key": k, "value": str(env.get(k, ""))} for k in sorted(env.keys())]
-            self._env_table.rows = rows
-            self._env_table.update()
+                self._env_rows = [("error", str(data))]
         except Exception as e:
-            self._env_table.rows = [{"key": "error", "value": str(e)}]
-            self._env_table.update()
+            self._env_rows = [("error", str(e))]
+
+        self._render_env()
+
+    def _env_clear_filter(self) -> None:
+        if self._env_search:
+            self._env_search.set_value("")
+        self._render_env()
+
+    def _render_env(self) -> None:
+        if self._env_frame is None:
+            return
+
+        q = ""
+        if self._env_search:
+            q = (self._env_search.value or "").strip().lower()
+
+        rows = self._env_rows
+        if q:
+            rows = [(k, v) for (k, v) in rows if q in k.lower() or q in v.lower()]
+
+        self._env_frame.clear()
+        with self._env_frame:
+            if not rows:
+                ui.html('<div style="padding:10px; opacity:.7;">—</div>')
+                return
+
+            for k, v in rows:
+                k_e = html.escape(k)
+                v_e = html.escape(v)
+                ui.html(
+                    f'<div class="env-row">'
+                    f'  <div class="env-k" data-copy="{k_e}">{k_e}</div>'
+                    f'  <div class="env-v" data-copy="{v_e}">{v_e}</div>'
+                    f'</div>'
+                )
 
     async def refresh_now(self) -> None:
         try:
             now = await self._get_json("/panel/now")
-            title = now.get("title") or "—"
-            self._now_title.set_text(title)
+            self._now_title.set_text(now.get("title") or "—")
         except Exception:
             self._now_title.set_text("—")
 
@@ -458,10 +423,10 @@ class ControlUI:
         self._up_list_container.clear()
         with self._up_list_container:
             if not titles:
-                ui.html('<div class="az-small">—</div>')
+                ui.html('<div style="opacity:.7; font-size: 12px;">—</div>')
                 return
             for i, t in enumerate(titles, start=1):
-                t_safe = str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                t_safe = html.escape(str(t))
                 ui.html(
                     f'<div class="az-item"><span class="idx">{i}.</span> '
                     f'<span class="txt" data-copy="{t_safe}">{t_safe}</span></div>'
@@ -475,7 +440,6 @@ class ControlUI:
         except Exception:
             if self._logs_engine:
                 self._logs_engine.set_value("")
-
         try:
             sch = await self._get_text("/logs?service=scheduler&tail=200")
             if self._logs_sched:
