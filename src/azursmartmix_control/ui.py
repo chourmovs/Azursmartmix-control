@@ -11,8 +11,9 @@ from azursmartmix_control.config import Settings
 class ControlUI:
     """NiceGUI frontend that consumes the local FastAPI endpoints.
 
-    Notes (NiceGUI json_editor):
-    - To change displayed JSON, mutate editor.properties then call editor.update() (no args).
+    NiceGUI API notes:
+    - json_editor: mutate editor.properties['content'] then call editor.update() (no args)
+    - badge.set_text(...) returns None (no chaining!)
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -53,6 +54,7 @@ class ControlUI:
                     self._lbl_docker = ui.badge("Docker: ?", color="grey")
                     self._lbl_engine = ui.badge("Engine: ?", color="grey")
                     self._lbl_sched = ui.badge("Scheduler: ?", color="grey")
+
                 with ui.row().classes("items-center gap-2"):
                     ui.button("Refresh", on_click=self.refresh_all).props("outline")
                     ui.button("Auto-refresh (2s)", on_click=self.enable_autorefresh).props("outline")
@@ -92,12 +94,17 @@ class ControlUI:
         ui.timer(0.1, self.refresh_all, once=True)
 
     def _set_json(self, editor: Any, payload: Dict[str, Any]) -> None:
-        """Update NiceGUI JsonEditor content safely."""
         if editor is None:
             return
-        # JsonEditor expects properties['content'] with either {'json': ...} or {'text': ...}
         editor.properties["content"] = {"json": payload}
         editor.update()
+
+    def _badge_set(self, badge: Any, text: str, color: str) -> None:
+        """Set badge text + color without chaining (NiceGUI returns None on set_text)."""
+        if badge is None:
+            return
+        badge.set_text(text)
+        badge.props(f"color={color}")
 
     async def _get_json(self, path: str) -> Dict[str, Any]:
         url = f"http://127.0.0.1:{self.settings.ui_port}{self.api_base}{path}"
@@ -130,8 +137,7 @@ class ControlUI:
         except Exception as e:
             err = {"error": str(e)}
             self._set_json(self._json_status, err)
-            if self._lbl_docker:
-                self._lbl_docker.set_text("Docker: error").props("color=red")
+            self._badge_set(self._lbl_docker, "Docker: error", "red")
 
     async def refresh_config(self) -> None:
         try:
@@ -178,10 +184,7 @@ class ControlUI:
 
     def _update_badges(self, data: Dict[str, Any]) -> None:
         docker_ok = bool(data.get("docker_ping"))
-        if self._lbl_docker:
-            self._lbl_docker.set_text(f"Docker: {'OK' if docker_ok else 'DOWN'}").props(
-                f"color={'green' if docker_ok else 'red'}"
-            )
+        self._badge_set(self._lbl_docker, f"Docker: {'OK' if docker_ok else 'DOWN'}", "green" if docker_ok else "red")
 
         eng = data.get("engine") or {}
         sch = data.get("scheduler") or {}
@@ -193,15 +196,19 @@ class ControlUI:
             hl = x.get("health")
             return f"{label}: {st} / health={hl}" if hl else f"{label}: {st}"
 
-        if self._lbl_engine:
-            present = bool(eng.get("present"))
-            color = "green" if present and eng.get("status") == "running" else ("red" if not present else "orange")
-            self._lbl_engine.set_text(badge_text(eng, "Engine")).props(f"color={color}")
+        if eng.get("present") and eng.get("status") == "running":
+            self._badge_set(self._lbl_engine, badge_text(eng, "Engine"), "green")
+        elif not eng.get("present"):
+            self._badge_set(self._lbl_engine, badge_text(eng, "Engine"), "red")
+        else:
+            self._badge_set(self._lbl_engine, badge_text(eng, "Engine"), "orange")
 
-        if self._lbl_sched:
-            present = bool(sch.get("present"))
-            color = "green" if present and sch.get("status") == "running" else ("red" if not present else "orange")
-            self._lbl_sched.set_text(badge_text(sch, "Scheduler")).props(f"color={color}")
+        if sch.get("present") and sch.get("status") == "running":
+            self._badge_set(self._lbl_sched, badge_text(sch, "Scheduler"), "green")
+        elif not sch.get("present"):
+            self._badge_set(self._lbl_sched, badge_text(sch, "Scheduler"), "red")
+        else:
+            self._badge_set(self._lbl_sched, badge_text(sch, "Scheduler"), "orange")
 
     def enable_autorefresh(self) -> None:
         if self._timer is not None:
