@@ -93,7 +93,7 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .az-item .idx{ display:inline-block; min-width:24px; font-weight:950; color: rgba(255,255,255,.75); }
 .az-item .txt{ font-weight:650; }
 
-/* ===== Runtime tables (real table) ===== */
+/* ===== Runtime tables ===== */
 .rt-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 900px){ .rt-grid{ grid-template-columns: 1fr; } }
 
@@ -109,11 +109,7 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
   border-bottom: 1px solid rgba(255,255,255,.08);
   color: rgba(255,255,255,.92);
 }
-.rt-table{
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
+.rt-table{ width: 100%; border-collapse: collapse; font-size: 13px; }
 .rt-table tr td{
   padding: 8px 12px;
   border-bottom: 1px solid rgba(255,255,255,.06);
@@ -182,21 +178,17 @@ class ControlUI:
         self.timeout = httpx.Timeout(2.5, connect=1.5)
         self._timer = None
 
-        # runtime
         self._docker_badge = None
         self._rt_engine_tbl = None
         self._rt_sched_tbl = None
 
-        # now/upcoming
         self._now_title = None
         self._up_list_container = None
 
-        # env viewer
         self._env_search = None
         self._env_frame = None
         self._env_rows: List[Tuple[str, str]] = []
 
-        # logs
         self._logs_engine = None
         self._logs_sched = None
 
@@ -241,14 +233,12 @@ class ControlUI:
                     self._rt_sched_tbl = self._runtime_box("Scheduler")
 
     def _runtime_box(self, title: str):
-        box = ui.element("div").classes("rt-box")
-        with box:
-            ui.element("div").classes("rt-box-h").set_text(title)
+        with ui.element("div").classes("rt-box"):
+            ui.label(title).classes("rt-box-h")  # <-- FIX: label supports text, element doesn't
             tbl = ui.html(self._runtime_table_html({}))
-        return tbl
+            return tbl
 
     def _runtime_table_html(self, data: Dict[str, Any]) -> str:
-        # expected keys: name, image, status, health, uptime
         def v(key: str, default: str = "—") -> str:
             raw = data.get(key)
             if raw is None or raw == "":
