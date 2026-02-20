@@ -15,7 +15,7 @@ services:
       COMPOSE_PATH: "/compose/docker-compose.yml"
       COMPOSE_SERVICE_ENGINE: "azursmartmix_engine"
       COMPOSE_SERVICE_SCHEDULER: "azursmartmix_scheduler"
-      
+
       ICECAST_PUBLIC_URL: "http://chourmovs.ddnsfree.com:8000/gst-test.mp3"
       ICECAST_HOST: "web"
       ICECAST_PORT: "8000"
@@ -23,13 +23,25 @@ services:
       ICECAST_SCHEME: "http"
       ICECAST_STATUS_PATH: "/status-json.xsl"
 
+      # --- NEW: host project directory + target image for update ---
+      AZURAMIX_DIR: "/var/azuramix"
+      AZURSMARTMIX_IMAGE: "chourmovs/azursmartmix:beta1"
+
     ports:
       - "8088:8088"
 
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # IMPORTANT: RW required for start/stop/up/down/recreate via docker api/cli
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+
+      # runtime config
       - ./config/config.yml:/config/config.yml:ro
+
+      # existing compose file mount (kept)
       - ../docker-compose.yml:/compose/docker-compose.yml:ro
+
+      # NEW: host project dir (ro is enough to run docker compose there)
+      - /var/azuramix:/var/azuramix:ro
 
     networks:
       - azursmartmix_net
