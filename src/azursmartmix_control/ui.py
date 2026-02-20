@@ -101,6 +101,14 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .az-actions .q-btn{ border-radius: 10px !important; font-weight: 900 !important; text-transform:none !important; }
 .az-actions .q-btn--outline{ border:1px solid rgba(255,255,255,.55) !important; color:white !important; }
 
+.az-opbtn .q-btn{
+  border-radius: 10px !important;
+  font-weight: 950 !important;
+  text-transform:none !important;
+  padding: 6px 10px !important;
+}
+.az-opbtn .q-btn--outline{ border:1px solid rgba(255,255,255,.55) !important; color:white !important; }
+
 .az-list{ display:flex; flex-direction:column; gap:8px; }
 .az-item{ padding: 10px 12px; border-radius: 10px; border: 1px solid var(--az-border); background: rgba(255,255,255,.04); }
 .az-item .idx{ display:inline-block; min-width:24px; font-weight:950; color: rgba(255,255,255,.75); }
@@ -259,7 +267,7 @@ class ControlUI:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.api_base = settings.api_prefix.rstrip("/")
-        self.timeout = httpx.Timeout(2.5, connect=1.5)
+        self.timeout = httpx.Timeout(10.0, connect=2.0)  # ops can take longer
         self._timer = None
 
         self._docker_badge = None
@@ -279,6 +287,17 @@ class ControlUI:
         self._log_html_engine = None
         self._log_html_sched = None
 
+        # NEW: ops modal
+        self._ops_dialog = None
+        self._ops_html = None
+        self._ops_busy = False
+
+        # NEW: header buttons refs (to disable while running)
+        self._btn_down = None
+        self._btn_up = None
+        self._btn_recreate = None
+        self._btn_update = None
+
     def _stream_public_url(self) -> str:
         public = getattr(self.settings, "icecast_public_url", "") or ""
         public = str(public).strip()
@@ -297,14 +316,26 @@ class ControlUI:
         ui.add_head_html(f"<script>{AZURA_JS}</script>")
         ui.page_title("AzurSmartMix Control")
 
+        self._build_ops_dialog()
+
         with ui.header().classes("az-topbar items-center justify-between"):
             with ui.row().classes("items-center gap-3"):
                 ui.label("azuracast").classes("az-brand text-xl")
                 ui.label("AzurSmartMix Control").classes("az-sub text-sm")
-            with ui.row().classes("items-center gap-2 az-actions"):
+
+            with ui.row().classes("items-center gap-2 az-opbtn"):
+                # NEW: ops buttons (compose control)
+                self._btn_up = ui.button("Start", on_click=self.op_compose_up).props("unelevated color=positive")
+                self._btn_down = ui.button("Stop", on_click=self.op_compose_down).props("unelevated color=negative")
+                self._btn_recreate = ui.button("Recreate", on_click=self.op_compose_recreate).props("unelevated color=warning")
+                self._btn_update = ui.button("Update", on_click=self.op_compose_update).props("outline")
+
+                ui.separator().props("vertical").style("height:26px; opacity:.35;")
+
+                # Existing controls
                 ui.button("Refresh", on_click=self.refresh_all).props("unelevated color=white text-color=primary")
                 ui.button("Auto 5s", on_click=self.enable_autorefresh).props("outline")
-                ui.button("Stop", on_click=self.disable_autorefresh).props("outline")
+                ui.button("Stop Auto", on_click=self.disable_autorefresh).props("outline")
 
         with ui.element("div").classes("az-wrap"):
             with ui.element("div").classes("az-grid"):
@@ -318,13 +349,93 @@ class ControlUI:
 
         ui.timer(0.1, self.refresh_all, once=True)
 
+    # -------------------- Ops modal + API calls --------------------
+
+    def _build_ops_dialog(self) -> None:
+        with ui.dialog() as d:
+            self._ops_dialog = d
+            with ui.card().classes("az-card").style("min-width: 920px; max-width: 1200px;"):
+                with ui.element("div").classes("az-card-h"):
+                    ui.label("Operations Console")
+                    ui.button("Close", on_click=d.close).props("outline")
+                with ui.element("div").classes("az-card-b"):
+                    ui.label(f"cwd: {self.settings.azuramix_dir}").style("font-family: var(--az-mono); font-size: 12px; opacity:.85;")
+                    ui.label(f"image: {self.settings.azursmartmix_image}").style("font-family: var(--az-mono); font-size: 12px; opacity:.65; margin-top: 2px;")
+                    ui.separator().style("opacity:.25; margin: 10px 0;")
+                    with ui.element("div").classes("console-frame").style("height: 520px;"):
+                        self._ops_html = ui.html('<div class="console-content">—</div>')
+        # no return
+
+    async def _post_text(self, path: str) -> str:
+        url = f"http://127.0.0.1:{self.settings.ui_port}{self.api_base}{path}"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(url)
+            r.raise_for_status()
+            return r.text
+
+    def _set_ops_busy(self, busy: bool) -> None:
+        self._ops_busy = busy
+        for b in (self._btn_down, self._btn_up, self._btn_recreate, self._btn_update):
+            if b:
+                b.disable() if busy else b.enable()
+
+    def _highlight_ops_html(self, text: str) -> str:
+        # Reuse log highlighting heuristics for ops console
+        esc = html.escape(text)
+        esc = re.sub(r"\bok:\s*(True|False)\b", lambda m: f'<span class="t-bold {"t-ok" if m.group(1)=="True" else "t-err"}">ok: {m.group(1)}</span>', esc)
+        esc = re.sub(r"\brc:\s*(\d+)\b", lambda m: f'<span class="t-dim">rc: {m.group(1)}</span>', esc)
+        esc = re.sub(r"\b(stdout|stderr)\b", lambda m: f'<span class="t-vio t-bold">{m.group(1)}</span>', esc)
+        esc = re.sub(r"\bdocker\b", lambda m: f'<span class="t-cyan t-bold">{m.group(0)}</span>', esc, flags=re.IGNORECASE)
+        esc = re.sub(r"\bcompose\b", lambda m: f'<span class="t-cyan">{m.group(0)}</span>', esc, flags=re.IGNORECASE)
+        esc = re.sub(r"\b(force-recreate|down|up)\b", lambda m: f'<span class="t-warn t-bold">{m.group(0)}</span>', esc, flags=re.IGNORECASE)
+        esc = re.sub(r"\berror\b", lambda m: f'<span class="t-err t-bold">{m.group(0)}</span>', esc, flags=re.IGNORECASE)
+        return f'<div class="console-content">{esc}</div>'
+
+    async def _run_op(self, label: str, path: str) -> None:
+        if self._ops_busy:
+            ui.notify("Operation already running", type="warning")
+            return
+
+        self._set_ops_busy(True)
+        try:
+            if self._ops_dialog:
+                self._ops_dialog.open()
+            if self._ops_html:
+                self._ops_html.set_content(self._highlight_ops_html(f"== {label} ==\nPOST {path}\n\nrunning...\n"))
+
+            txt = await self._post_text(path)
+
+            if self._ops_html:
+                self._ops_html.set_content(self._highlight_ops_html(txt))
+
+            ui.notify(f"{label}: done", type="positive")
+            await self.refresh_all()
+        except Exception as e:
+            if self._ops_html:
+                self._ops_html.set_content(self._highlight_ops_html(f"== {label} ==\nerror: {e}\n"))
+            ui.notify(f"{label}: error", type="negative")
+        finally:
+            self._set_ops_busy(False)
+
+    async def op_compose_down(self) -> None:
+        await self._run_op("Stop (docker compose down)", "/ops/compose/down")
+
+    async def op_compose_up(self) -> None:
+        await self._run_op("Start (docker compose up -d)", "/ops/compose/up")
+
+    async def op_compose_recreate(self) -> None:
+        await self._run_op("Recreate (up -d --force-recreate)", "/ops/compose/recreate")
+
+    async def op_compose_update(self) -> None:
+        await self._run_op("Update (down + image rm)", "/ops/compose/update")
+
+    # -------------------- Existing UI cards --------------------
+
     def _card_runtime(self) -> None:
         with ui.element("div").classes("az-card"):
             with ui.element("div").classes("az-card-h"):
                 ui.label("Runtime Status")
-                self._docker_badge = ui.html(
-                    '<span class="az-badge"><span class="az-dot warn"></span><span>Docker: …</span></span>'
-                )
+                self._docker_badge = ui.html('<span class="az-badge"><span class="az-dot warn"></span><span>Docker: …</span></span>')
             with ui.element("div").classes("az-card-b"):
                 with ui.element("div").classes("rt-grid"):
                     self._rt_engine_tbl = self._runtime_box("Engine")
@@ -343,17 +454,8 @@ class ControlUI:
                 raw = default
             return html.escape(str(raw))
 
-        rows = [
-            ("name", v("name")),
-            ("image", v("image")),
-            ("status", v("status")),
-            ("health", v("health", "-")),
-            ("uptime", v("uptime", "-")),
-        ]
-        tr = "".join(
-            f'<tr><td class="rt-k">{html.escape(k)}</td><td class="rt-v" data-copy="{val}">{val}</td></tr>'
-            for k, val in rows
-        )
+        rows = [("name", v("name")), ("image", v("image")), ("status", v("status")), ("health", v("health", "-")), ("uptime", v("uptime", "-"))]
+        tr = "".join(f'<tr><td class="rt-k">{html.escape(k)}</td><td class="rt-v" data-copy="{val}">{val}</td></tr>' for k, val in rows)
         return f'<table class="rt-table">{tr}</table>'
 
     def _card_env(self) -> None:
@@ -378,13 +480,10 @@ class ControlUI:
                 self._now_title = ui.label("—").classes("text-xl").style("font-weight: 950; margin: 2px 0 0 0;")
                 self._now_meta = ui.html(self._now_meta_html({}))
                 self._now_player = ui.html(self._player_html(stream_url))
-                ui.label("Sources: Icecast(observed) + scheduler NEXT + engine STREAM_START hint").style(
-                    "font-size: 12px; opacity:.7; margin-top: 10px;"
-                )
+                ui.label("Sources: Icecast(observed) + scheduler NEXT + engine STREAM_START hint").style("font-size: 12px; opacity:.7; margin-top: 10px;")
 
     def _now_meta_html(self, now: Dict[str, Any]) -> str:
         now_mode = now.get("now_mode") or "observed"
-
         playlist_eff = now.get("playlist_effective")
         pl_txt = html.escape(str(playlist_eff)) if playlist_eff else "—"
 
@@ -463,6 +562,8 @@ class ControlUI:
                         with ui.element("div").classes("console-frame").style("background: rgba(0,0,0,.55) !important;"):
                             self._log_html_sched = ui.html('<div class="console-content">—</div>')
 
+    # -------------------- HTTP helpers --------------------
+
     async def _get_json(self, path: str) -> Dict[str, Any]:
         url = f"http://127.0.0.1:{self.settings.ui_port}{self.api_base}{path}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -514,6 +615,8 @@ class ControlUI:
 
         return f'<div class="console-content">{esc}</div>'
 
+    # -------------------- Refresh flows --------------------
+
     async def refresh_all(self) -> None:
         await self.refresh_runtime()
         await self.refresh_engine_env()
@@ -547,9 +650,7 @@ class ControlUI:
         if self._docker_badge is None:
             return
         dot = "ok" if ok else "err"
-        self._docker_badge.set_content(
-            f'<span class="az-badge"><span class="az-dot {dot}"></span><span>{html.escape(text)}</span></span>'
-        )
+        self._docker_badge.set_content(f'<span class="az-badge"><span class="az-dot {dot}"></span><span>{html.escape(text)}</span></span>')
 
     async def refresh_engine_env(self) -> None:
         if self._env_frame is None:
@@ -589,12 +690,7 @@ class ControlUI:
             for k, v in rows:
                 k_e = html.escape(k)
                 v_e = html.escape(v)
-                ui.html(
-                    f'<div class="env-row">'
-                    f'  <div class="env-k" data-copy="{k_e}">{k_e}</div>'
-                    f'  <div class="env-v" data-copy="{v_e}">{v_e}</div>'
-                    f'</div>'
-                )
+                ui.html(f'<div class="env-row"><div class="env-k" data-copy="{k_e}">{k_e}</div><div class="env-v" data-copy="{v_e}">{v_e}</div></div>')
 
     async def refresh_now(self) -> None:
         try:
