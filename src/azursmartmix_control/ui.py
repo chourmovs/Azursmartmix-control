@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import html
 import re
@@ -65,6 +65,7 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .az-topbar .az-sub { opacity: .85; font-weight: 600; }
 
 .az-wrap{ width:100%; max-width: var(--wrap-max); margin: 0 auto; padding: 18px 18px 28px 18px; }
+
 .az-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: var(--grid-gap); }
 @media (max-width: 1200px){ .az-grid{ grid-template-columns: 1fr; } }
 
@@ -174,11 +175,6 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 }
 .env-row:hover{ background: rgba(255,255,255,.05); }
 
-.env-frame::-webkit-scrollbar{ width: 10px; }
-.env-frame::-webkit-scrollbar-track{ background: rgba(255,255,255,.06); border-radius: 10px; }
-.env-frame::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.22); border-radius: 10px; }
-.env-frame::-webkit-scrollbar-thumb:hover{ background: rgba(255,255,255,.34); }
-
 .console-frame{
   height: 420px;
   overflow: auto;
@@ -250,6 +246,49 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
   border:1px solid var(--az-border);
   background: rgba(255,255,255,.05);
 }
+
+.az-tabsbar{
+  margin: 10px 0 18px 0;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.az-tabsbar .q-tabs{
+  background: rgba(0,0,0,.15) !important;
+}
+
+.az-editor{
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 12px;
+  background: rgba(0,0,0,.12);
+  padding: 12px;
+}
+
+.az-editor-h{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.az-editor-grid{
+  display:grid;
+  grid-template-columns: 360px 1fr 52px;
+  gap: 10px;
+}
+@media (max-width: 1200px){ .az-editor-grid{ grid-template-columns: 1fr; } }
+
+.az-editor-grid input{
+  font-family: var(--az-mono) !important;
+}
+
+.az-editor-row{
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
+}
 """
 
 AZURA_JS = r"""
@@ -297,9 +336,24 @@ class ControlUI:
         self._btn_recreate = None
         self._btn_update = None
 
-        # NEW: selected tag
         self._tag_select = None
         self._tag_value = None  # type: ignore[assignment]
+
+        # NEW: header restart hint
+        self._restart_needed = False
+        self._restart_badge = None
+
+        # NEW: tabs
+        self._tabs = None
+        self._tab_dashboard = None
+        self._tab_compose = None
+
+        # NEW: compose env editor
+        self._compose_env_frame = None
+        self._compose_env_rows_container = None
+        self._compose_env_rows: List[Dict[str, Any]] = []
+        self._compose_env_busy = False
+        self._compose_env_format = "dict"
 
     def _stream_public_url(self) -> str:
         public = getattr(self.settings, "icecast_public_url", "") or ""
@@ -315,7 +369,6 @@ class ControlUI:
         return f"{scheme}://{host}:{port}{mount}"
 
     def _default_tag_from_image(self) -> str:
-        # Try to extract tag from AZURSMARTMIX_IMAGE (repo:tag)
         s = (self.settings.azursmartmix_image or "").strip()
         if ":" in s:
             return s.rsplit(":", 1)[1].strip() or "latest"
@@ -333,13 +386,13 @@ class ControlUI:
                 ui.label("azuracast").classes("az-brand text-xl")
                 ui.label("AzurSmartMix Control").classes("az-sub text-sm")
 
+                # NEW: restart-needed badge (hidden by default)
+                self._restart_badge = ui.html("").classes("ml-2")
+
             with ui.row().classes("items-center gap-2 az-opbtn"):
-                # NEW: tag selector for Update
                 default_tag = self._default_tag_from_image()
                 self._tag_value = default_tag
 
-                # narrow options: user can also type; but NiceGUI select doesn't support free text everywhere.
-                # We provide common tags and an "other" input in the modal console (optional).
                 self._tag_select = ui.select(
                     options=["latest", "beta1", "beta2", "rc", "dev"],
                     value=default_tag,
@@ -359,23 +412,48 @@ class ControlUI:
                 ui.button("Stop Auto", on_click=self.disable_autorefresh).props("outline")
 
         with ui.element("div").classes("az-wrap"):
-            with ui.element("div").classes("az-grid"):
-                self._card_runtime()
-                self._card_env()
-                self._card_now()
-                self._card_upcoming()
+            # NEW: main tabs
+            with ui.element("div").classes("az-tabsbar"):
+                self._tabs = ui.tabs().classes("w-full")
+                self._tab_dashboard = ui.tab("Dashboard")
+                self._tab_compose = ui.tab("Compose Env")
 
-            with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
-                self._card_logs()
+            with ui.tab_panels(self._tabs, value=self._tab_dashboard).classes("w-full"):
+                with ui.tab_panel(self._tab_dashboard):
+                    with ui.element("div").classes("az-grid"):
+                        self._card_runtime()
+                        self._card_env()
+                        self._card_now()
+                        self._card_upcoming()
+
+                    with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
+                        self._card_logs()
+
+                with ui.tab_panel(self._tab_compose):
+                    self._card_compose_env_editor()
 
         ui.timer(0.1, self.refresh_all, once=True)
+        ui.timer(0.2, self.refresh_compose_env_editor, once=True)
 
     def _on_tag_change(self, e) -> None:
-        # e.value holds the new selection
         try:
             self._tag_value = str(e.value).strip()
         except Exception:
             self._tag_value = self._default_tag_from_image()
+
+    def _set_restart_needed(self, needed: bool) -> None:
+        self._restart_needed = bool(needed)
+        if not self._restart_badge:
+            return
+        if not self._restart_needed:
+            self._restart_badge.set_content("")
+            return
+        self._restart_badge.set_content(
+            '<span class="az-badge" style="border-color: rgba(245,158,11,.55); background: rgba(245,158,11,.15);">'
+            '<span class="az-dot warn"></span>'
+            '<span>Need restart to take effect</span>'
+            "</span>"
+        )
 
     # -------------------- Ops modal + API calls --------------------
 
@@ -388,11 +466,7 @@ class ControlUI:
                     ui.button("Close", on_click=d.close).props("outline")
                 with ui.element("div").classes("az-card-b"):
                     ui.label(f"cwd: {self.settings.azuramix_dir}").style("font-family: var(--az-mono); font-size: 12px; opacity:.85;")
-
-                    # repo + tag (computed)
-                    ui.label(
-                        f"repo: {self.settings.azursmartmix_repo} | tag: {self._default_tag_from_image()}"
-                    ).style("font-family: var(--az-mono); font-size: 12px; opacity:.65; margin-top: 2px;")
+                    ui.label(f"compose: {self.settings.azuramix_compose_file}").style("font-family: var(--az-mono); font-size: 12px; opacity:.65; margin-top: 2px;")
 
                     ui.separator().style("opacity:.25; margin: 10px 0;")
                     with ui.element("div").classes("console-frame").style("height: 520px;"):
@@ -404,6 +478,14 @@ class ControlUI:
             r = await client.post(url)
             r.raise_for_status()
             return r.text
+
+    async def _post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"http://127.0.0.1:{self.settings.ui_port}{self.api_base}{path}"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(url, json=payload)
+            r.raise_for_status()
+            data = r.json()
+            return data if isinstance(data, dict) else {"data": data}
 
     def _set_ops_busy(self, busy: bool) -> None:
         self._ops_busy = busy
@@ -428,7 +510,7 @@ class ControlUI:
         esc = re.sub(r"\berror\b", lambda m: f'<span class="t-err t-bold">{m.group(0)}</span>', esc, flags=re.IGNORECASE)
         return f'<div class="console-content">{esc}</div>'
 
-    async def _run_op(self, label: str, path: str) -> None:
+    async def _run_op(self, label: str, path: str, clears_restart_hint: bool = False) -> None:
         if self._ops_busy:
             ui.notify("Operation already running", type="warning")
             return
@@ -446,6 +528,9 @@ class ControlUI:
                 self._ops_html.set_content(self._highlight_ops_html(txt))
 
             ui.notify(f"{label}: done", type="positive")
+            if clears_restart_hint:
+                self._set_restart_needed(False)
+
             await self.refresh_all()
         except Exception as e:
             if self._ops_html:
@@ -455,23 +540,24 @@ class ControlUI:
             self._set_ops_busy(False)
 
     async def op_compose_down(self) -> None:
-        await self._run_op("Stop (docker compose down)", "/ops/compose/down")
+        await self._run_op("Stop (docker compose down)", "/ops/compose/down", clears_restart_hint=False)
 
     async def op_compose_up(self) -> None:
-        await self._run_op("Start (docker compose up -d)", "/ops/compose/up")
+        # start re-applies env
+        await self._run_op("Start (docker compose up -d)", "/ops/compose/up", clears_restart_hint=True)
 
     async def op_compose_recreate(self) -> None:
-        await self._run_op("Recreate (up -d --force-recreate)", "/ops/compose/recreate")
+        # recreate re-applies env
+        await self._run_op("Recreate (up -d --force-recreate)", "/ops/compose/recreate", clears_restart_hint=True)
 
     async def op_compose_update(self) -> None:
         tag = str(self._tag_value or "").strip()
-        # If empty, backend will fallback to AZURSMARTMIX_IMAGE
         qs = ""
         if tag:
             qs = "?tag=" + urllib.parse.quote(tag, safe="")
-        await self._run_op(f"Update (down + rm image:{tag or 'default'})", "/ops/compose/update" + qs)
+        await self._run_op(f"Update (down + rm image:{tag or 'default'})", "/ops/compose/update" + qs, clears_restart_hint=True)
 
-    # -------------------- Existing UI cards --------------------
+    # -------------------- Cards (Dashboard) --------------------
 
     def _card_runtime(self) -> None:
         with ui.element("div").classes("az-card"):
@@ -525,7 +611,6 @@ class ControlUI:
                 ui.label("Sources: Icecast(observed) + scheduler NEXT + engine STREAM_START hint").style("font-size: 12px; opacity:.7; margin-top: 10px;")
 
     def _now_meta_html(self, now: Dict[str, Any]) -> str:
-        now_mode = now.get("now_mode") or "observed"
         playlist_eff = now.get("playlist_effective")
         pl_txt = html.escape(str(playlist_eff)) if playlist_eff else "—"
 
@@ -547,22 +632,11 @@ class ControlUI:
             age_txt = f"{age}s" if isinstance(age, int) else ""
             hint = f'<span class="np-pill"><span class="t-dim">last STREAM_START</span><span class="t-dim">{html.escape(age_txt)}</span></span>'
 
-        obs = ""
-        if now_mode == "optimistic":
-            title_obs = html.escape(str(now.get("title_observed") or "—"))
-            pl_obs = html.escape(str(now.get("playlist_observed") or "—"))
-            obs = (
-                f'<div class="np-line"><span class="np-k">observed:</span> '
-                f'<span class="t-dim" data-copy="{title_obs}">{title_obs}</span> '
-                f'<span class="t-dim">|</span> <span class="t-dim" data-copy="{pl_obs}">{pl_obs}</span></div>'
-            )
-
         return (
             '<div class="np-meta">'
             f'  <div class="np-line"><span class="np-k">playlist:</span> <span class="np-v" data-copy="{pl_txt}">{pl_txt}</span></div>'
             f'  <div class="np-line"><span class="np-k">next(pred):</span> <span class="np-v" data-copy="{pred_title}">{pred_title}</span>'
             f'    <span class="t-dim">|</span> <span class="np-k">pl:</span> <span class="np-v" data-copy="{pred_pl}">{pred_pl}</span></div>'
-            f'  {obs}'
             f'  <div class="np-line">{hint}</div>'
             '</div>'
         )
@@ -603,6 +677,120 @@ class ControlUI:
                     with ui.tab_panel(t_sched):
                         with ui.element("div").classes("console-frame").style("background: rgba(0,0,0,.55) !important;"):
                             self._log_html_sched = ui.html('<div class="console-content">—</div>')
+
+    # -------------------- NEW: Compose env editor tab --------------------
+
+    def _card_compose_env_editor(self) -> None:
+        with ui.element("div").classes("az-card").style("grid-column: 1 / -1;"):
+            with ui.element("div").classes("az-card-h"):
+                ui.label("Compose Env Editor")
+                ui.label(f"{self.settings.compose_service_engine} @ {self.settings.azuramix_compose_file}").classes("text-xs").style("opacity:.85;")
+            with ui.element("div").classes("az-card-b"):
+                self._compose_env_frame = ui.element("div").classes("az-editor")
+
+                with self._compose_env_frame:
+                    with ui.element("div").classes("az-editor-h"):
+                        ui.label("Edit environment variables (engine)").style("font-weight: 950;")
+                        with ui.row().classes("items-center gap-2"):
+                            ui.button("Reload", on_click=self.refresh_compose_env_editor).props("outline")
+                            ui.button("Add", on_click=self._compose_env_add_row).props("outline")
+                            ui.button("Save", on_click=self.save_compose_env_editor).props("unelevated color=positive")
+
+                    ui.label("Changes are written to docker-compose.yml. Restart/Recreate required to apply.").style(
+                        "font-size: 12px; opacity:.75; margin-bottom: 10px;"
+                    )
+
+                    self._compose_env_rows_container = ui.element("div").classes("az-list")
+
+    def _compose_env_add_row(self) -> None:
+        self._compose_env_rows.append({"k": "", "v": "", "k_in": None, "v_in": None, "rm_btn": None})
+        self._render_compose_env_rows()
+
+    def _render_compose_env_rows(self) -> None:
+        if not self._compose_env_rows_container:
+            return
+        self._compose_env_rows_container.clear()
+
+        with self._compose_env_rows_container:
+            if not self._compose_env_rows:
+                ui.html('<div style="opacity:.75; font-size:12px;">— no env vars —</div>')
+                return
+
+            for idx, row in enumerate(self._compose_env_rows):
+                with ui.element("div").classes("az-editor-row"):
+                    with ui.element("div").classes("az-editor-grid"):
+                        k_in = ui.input(value=str(row.get("k", "")), placeholder="KEY").props("dense outlined")
+                        v_in = ui.input(value=str(row.get("v", "")), placeholder="VALUE").props("dense outlined")
+
+                        def make_rm(i: int):
+                            def _rm():
+                                if 0 <= i < len(self._compose_env_rows):
+                                    self._compose_env_rows.pop(i)
+                                    self._render_compose_env_rows()
+                            return _rm
+
+                        rm_btn = ui.button("✕", on_click=make_rm(idx)).props("unelevated color=negative")
+
+                        row["k_in"] = k_in
+                        row["v_in"] = v_in
+                        row["rm_btn"] = rm_btn
+
+    async def refresh_compose_env_editor(self) -> None:
+        if self._compose_env_busy:
+            return
+        self._compose_env_busy = True
+        try:
+            data = await self._get_json("/compose/engine_env")
+            env = data.get("environment") if isinstance(data, dict) else None
+            if not isinstance(env, dict):
+                env = {}
+
+            # stable ordering
+            items = [(str(k), "" if env.get(k) is None else str(env.get(k))) for k in sorted(env.keys())]
+            self._compose_env_rows = [{"k": k, "v": v, "k_in": None, "v_in": None, "rm_btn": None} for k, v in items]
+            self._render_compose_env_rows()
+        except Exception as e:
+            self._compose_env_rows = [{"k": "error", "v": str(e), "k_in": None, "v_in": None, "rm_btn": None}]
+            self._render_compose_env_rows()
+        finally:
+            self._compose_env_busy = False
+
+    async def save_compose_env_editor(self) -> None:
+        if self._compose_env_busy:
+            ui.notify("Compose editor busy", type="warning")
+            return
+        self._compose_env_busy = True
+        try:
+            env_out: Dict[str, str] = {}
+            for row in self._compose_env_rows:
+                k_in = row.get("k_in")
+                v_in = row.get("v_in")
+                k = ""
+                v = ""
+                try:
+                    k = str(k_in.value).strip() if k_in else str(row.get("k", "")).strip()
+                    v = str(v_in.value) if v_in else str(row.get("v", ""))
+                except Exception:
+                    k = str(row.get("k", "")).strip()
+                    v = str(row.get("v", ""))
+
+                if not k:
+                    continue
+                env_out[k] = v
+
+            payload = {"environment": env_out, "env_format_prefer": self._compose_env_format}
+            r = await self._post_json("/compose/engine_env", payload)
+
+            if r.get("ok"):
+                self._set_restart_needed(True)
+                ui.notify("Saved. Restart required.", type="warning")
+                await self.refresh_engine_env()  # refresh read-only panel
+            else:
+                ui.notify("Save failed", type="negative")
+        except Exception as e:
+            ui.notify(f"Save error: {e}", type="negative")
+        finally:
+            self._compose_env_busy = False
 
     # -------------------- HTTP helpers --------------------
 
