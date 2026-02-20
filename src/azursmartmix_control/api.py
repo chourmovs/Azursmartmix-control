@@ -27,6 +27,43 @@ def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
     return f"{h:02d}:{m:02d}:{sec:02d}"
 
 
+def _fmt_cmd_result(r: Dict[str, Any]) -> str:
+    """Console-friendly serialization for compose operations."""
+    if not isinstance(r, dict):
+        return str(r)
+
+    def line(k: str, v: Any) -> str:
+        vv = "" if v is None else str(v)
+        return f"{k}: {vv}"
+
+    out = []
+    out.append(line("ok", r.get("ok")))
+    out.append(line("rc", r.get("rc")))
+    out.append(line("cwd", r.get("cwd")))
+    out.append(line("cmd", r.get("cmd")))
+    if r.get("started_utc"):
+        out.append(line("started_utc", r.get("started_utc")))
+    if r.get("ended_utc"):
+        out.append(line("ended_utc", r.get("ended_utc")))
+    if r.get("duration_ms") is not None:
+        out.append(line("duration_ms", r.get("duration_ms")))
+
+    stdout = (r.get("stdout") or "").strip()
+    stderr = (r.get("stderr") or "").strip()
+
+    if stdout:
+        out.append("")
+        out.append("---- stdout ----")
+        out.append(stdout)
+
+    if stderr:
+        out.append("")
+        out.append("---- stderr ----")
+        out.append(stderr)
+
+    return "\n".join(out).strip() + "\n"
+
+
 def create_api(settings: Settings) -> FastAPI:
     app = FastAPI(title="AzurSmartMix Control API", version="0.1.0")
 
@@ -68,6 +105,42 @@ def create_api(settings: Settings) -> FastAPI:
 
         return docker_client.tail_logs(name=name, tail=tail_eff)
 
+    # ------------------- NEW: Compose control endpoints -------------------
+
+    @app.post("/ops/compose/down", response_class=PlainTextResponse)
+    def ops_compose_down() -> str:
+        r = docker_client.compose_down(settings.azuramix_dir)
+        return _fmt_cmd_result(r)
+
+    @app.post("/ops/compose/up", response_class=PlainTextResponse)
+    def ops_compose_up() -> str:
+        r = docker_client.compose_up(settings.azuramix_dir)
+        return _fmt_cmd_result(r)
+
+    @app.post("/ops/compose/recreate", response_class=PlainTextResponse)
+    def ops_compose_recreate() -> str:
+        r = docker_client.compose_recreate(settings.azuramix_dir)
+        return _fmt_cmd_result(r)
+
+    @app.post("/ops/compose/update", response_class=PlainTextResponse)
+    def ops_compose_update() -> str:
+        r = docker_client.compose_update(settings.azuramix_dir, settings.azursmartmix_image)
+        # Flatten multi-step output as a readable console block
+        if not isinstance(r, dict) or "step_down" not in r:
+            return _fmt_cmd_result(r)
+
+        lines: List[str] = []
+        lines.append("== step: docker compose down ==")
+        lines.append(_fmt_cmd_result(r.get("step_down") or {}))
+        lines.append("")
+        lines.append(f"== step: docker image rm -f {settings.azursmartmix_image} || true ==")
+        lines.append(_fmt_cmd_result(r.get("step_image_rm") or {}))
+        lines.append("")
+        lines.append(f"overall_ok: {bool(r.get('ok'))}")
+        return "\n".join(lines).strip() + "\n"
+
+    # ------------------- Existing endpoints -------------------
+
     @app.get("/scheduler/upcoming")
     async def scheduler_upcoming(n: int = Query(10, ge=1, le=50)) -> JSONResponse:
         data = await sched.upcoming(n=n)
@@ -108,14 +181,6 @@ def create_api(settings: Settings) -> FastAPI:
         title_observed: Optional[str],
         upcoming_sched: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """
-        Fix 1-track lag:
-        - Icecast observed title may be behind.
-        - Scheduler NEXT list often contains the *real* current track as first item.
-        Rule:
-        - If upcoming[0] exists AND it does not match observed (normalized),
-          promote upcoming[0] as effective now, and upcoming list starts at upcoming[1].
-        """
         observed_norm = docker_client.normalize_title(title_observed or "")
         upcoming_list = []
         if isinstance(upcoming_sched, dict) and upcoming_sched.get("ok"):
@@ -131,7 +196,6 @@ def create_api(settings: Settings) -> FastAPI:
             first_title_raw = str(first.get("title") or "")
             first_norm = docker_client.normalize_title(first_title_raw)
 
-            # Promote if observed is empty OR observed != first upcoming (normalized)
             if (not observed_norm) or (first_norm and first_norm != observed_norm):
                 effective_now = first
                 effective_upcoming = upcoming_list[1:]
@@ -145,13 +209,11 @@ def create_api(settings: Settings) -> FastAPI:
 
     @app.get("/panel/now")
     async def panel_now() -> Dict[str, Any]:
-        # 1) observed title from Icecast (can lag)
         ic = await ice.now_playing()
         title_observed = None
         if isinstance(ic, dict) and ic.get("ok"):
             title_observed = ic.get("title") or (ic.get("raw") or {}).get("title")
 
-        # 2) scheduler upcoming (title+playlist) computed relative to observed
         upcoming_sched = docker_client.compute_upcoming_from_scheduler_next(
             scheduler_container=settings.scheduler_container,
             current_title=title_observed,
@@ -159,14 +221,12 @@ def create_api(settings: Settings) -> FastAPI:
             tail=3000,
         )
 
-        # 3) engine STREAM_START hint (kept for debugging/UI hinting)
         ss = docker_client.last_engine_stream_start(
             engine_container=settings.engine_container,
             tail=1000,
             recent_window_s=12,
         )
 
-        # 4) observed playlist inference (best-effort)
         pl_observed = docker_client.infer_playlist_for_title_from_scheduler(
             scheduler_container=settings.scheduler_container,
             current_title=title_observed,
@@ -174,7 +234,6 @@ def create_api(settings: Settings) -> FastAPI:
         )
         playlist_observed = pl_observed.get("playlist") if isinstance(pl_observed, dict) else None
 
-        # 5) effective-now fix (promote upcoming[0] if Icecast lags)
         eff = _compute_effective_now_and_upcoming(title_observed, upcoming_sched)
         effective_now = eff.get("effective_now")
 
@@ -184,17 +243,14 @@ def create_api(settings: Settings) -> FastAPI:
 
         predicted_next = None
         if effective_now and isinstance(effective_now, dict):
-            # effective_now becomes authoritative for what user hears *now*
             title_effective = effective_now.get("title_display") or docker_client.display_title(str(effective_now.get("title") or ""))
             playlist_effective = effective_now.get("playlist") or playlist_effective
             now_mode = "promoted_from_upcoming"
 
-            # predicted next becomes the first item of effective_upcoming (if any)
             effective_upcoming = eff.get("effective_upcoming") or []
             if isinstance(effective_upcoming, list) and effective_upcoming:
                 predicted_next = effective_upcoming[0]
         else:
-            # No promotion happened; predicted next is first raw upcoming if present
             raw_up = eff.get("raw_upcoming") or []
             if isinstance(raw_up, list) and raw_up:
                 predicted_next = raw_up[0]
@@ -221,30 +277,24 @@ def create_api(settings: Settings) -> FastAPI:
 
     @app.get("/panel/upcoming")
     async def panel_upcoming(n: int = Query(10, ge=1, le=30)) -> Dict[str, Any]:
-        # 1) observed title from Icecast (can lag)
         ic = await ice.now_playing()
         current_title = None
         if isinstance(ic, dict) and ic.get("ok"):
             current_title = ic.get("title")
 
-        # 2) scheduler NEXT list (primary)
         upcoming_sched = docker_client.compute_upcoming_from_scheduler_next(
             scheduler_container=settings.scheduler_container,
             current_title=current_title,
-            n=max(12, n + 2),  # ensure we have enough after promotion
+            n=max(12, n + 2),
             tail=3000,
         )
 
-        # 3) apply same promotion logic so upcoming list aligns with what user hears now
         eff = _compute_effective_now_and_upcoming(current_title, upcoming_sched)
         effective_upcoming = eff.get("effective_upcoming") or []
         if not isinstance(effective_upcoming, list):
             effective_upcoming = []
-
-        # truncate to requested n
         effective_upcoming = effective_upcoming[:n]
 
-        # 4) Secondary debug/compat: engine preprocess (titles only)
         upcoming_engine = docker_client.compute_upcoming_from_preprocess(
             engine_container=settings.engine_container,
             current_title=current_title,
@@ -264,9 +314,7 @@ def create_api(settings: Settings) -> FastAPI:
                 "primary": upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None,
                 "secondary": upcoming_engine.get("source") if isinstance(upcoming_engine, dict) else None,
             },
-            # This is what UI should display:
             "upcoming": effective_upcoming,
-            # kept for older UI/debug:
             "upcoming_titles": upcoming_titles,
             "debug": {
                 "observed_norm": eff.get("observed_norm"),
