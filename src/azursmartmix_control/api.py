@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Query
@@ -28,7 +29,6 @@ def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
 
 
 def _fmt_cmd_result(r: Dict[str, Any]) -> str:
-    """Console-friendly serialization for compose operations."""
     if not isinstance(r, dict):
         return str(r)
 
@@ -62,6 +62,26 @@ def _fmt_cmd_result(r: Dict[str, Any]) -> str:
         out.append(stderr)
 
     return "\n".join(out).strip() + "\n"
+
+
+_RE_SAFE_TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def _build_image_ref(settings: Settings, tag: Optional[str]) -> str:
+    """Build docker image ref for update.
+
+    Priority:
+    1) tag provided => <AZURSMARTMIX_REPO>:<tag>
+    2) fallback => AZURSMARTMIX_IMAGE (already includes tag)
+    """
+    if tag:
+        t = tag.strip()
+        if not _RE_SAFE_TAG.match(t):
+            # hard safety: refuse shell-ish tags
+            raise ValueError(f"invalid tag: {tag!r}")
+        repo = (settings.azursmartmix_repo or "").strip() or "chourmovs/azursmartmix"
+        return f"{repo}:{t}"
+    return (settings.azursmartmix_image or "chourmovs/azursmartmix:latest").strip()
 
 
 def create_api(settings: Settings) -> FastAPI:
@@ -105,7 +125,7 @@ def create_api(settings: Settings) -> FastAPI:
 
         return docker_client.tail_logs(name=name, tail=tail_eff)
 
-    # ------------------- NEW: Compose control endpoints -------------------
+    # ------------------- Compose control endpoints -------------------
 
     @app.post("/ops/compose/down", response_class=PlainTextResponse)
     def ops_compose_down() -> str:
@@ -123,9 +143,15 @@ def create_api(settings: Settings) -> FastAPI:
         return _fmt_cmd_result(r)
 
     @app.post("/ops/compose/update", response_class=PlainTextResponse)
-    def ops_compose_update() -> str:
-        r = docker_client.compose_update(settings.azuramix_dir, settings.azursmartmix_image)
-        # Flatten multi-step output as a readable console block
+    def ops_compose_update(tag: Optional[str] = Query(default=None, description="image tag e.g. latest, beta1")) -> str:
+        # Validate + build image ref
+        try:
+            image_ref = _build_image_ref(settings, tag)
+        except Exception as e:
+            return f"ok: False\nerror: {e}\n"
+
+        r = docker_client.compose_update(settings.azuramix_dir, image_ref)
+
         if not isinstance(r, dict) or "step_down" not in r:
             return _fmt_cmd_result(r)
 
@@ -133,9 +159,10 @@ def create_api(settings: Settings) -> FastAPI:
         lines.append("== step: docker compose down ==")
         lines.append(_fmt_cmd_result(r.get("step_down") or {}))
         lines.append("")
-        lines.append(f"== step: docker image rm -f {settings.azursmartmix_image} || true ==")
+        lines.append(f"== step: docker image rm -f {image_ref} || true ==")
         lines.append(_fmt_cmd_result(r.get("step_image_rm") or {}))
         lines.append("")
+        lines.append(f"image_ref: {image_ref}")
         lines.append(f"overall_ok: {bool(r.get('ok'))}")
         return "\n".join(lines).strip() + "\n"
 
