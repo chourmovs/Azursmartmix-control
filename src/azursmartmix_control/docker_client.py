@@ -6,7 +6,7 @@ import re
 import shlex
 import subprocess
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import docker
 from docker.errors import DockerException, NotFound
@@ -33,31 +33,19 @@ class NextEntry:
 
 
 class DockerClient:
-    """Docker wrapper for control-plane introspection + controlled ops.
+    """Docker wrapper for control-plane introspection + controlled ops."""
 
-    Key features:
-    - Tail logs from engine/scheduler containers.
-    - Parse scheduler logs for NEXT entries (title + playlist).
-    - Infer 'Now Playing playlist' by matching Icecast title against scheduler NEXT title.
-    - Provide engine STREAM_START hint to display 'next' without UI lag.
-    - Execute docker compose operations against the host via /var/run/docker.sock + docker CLI.
-    """
-
-    # --- engine preprocess lines (kept for backward compat / debug) ---
     _RE_PREPROCESS = re.compile(r"\bpreprocess:\s*(?P<rest>.+?)\s*$", re.IGNORECASE)
     _RE_LEADING_IDX = re.compile(r"^\s*\d+\s*[\.\)]\s*")
     _RE_PAREN_TRAIL = re.compile(r"\s*\(.*\)\s*$")
     _RE_EXT = re.compile(r"\.(mp3|wav|flac|ogg|m4a|aac)\s*$", re.IGNORECASE)
 
-    # --- docker timestamps prefix (when docker logs called with timestamps=True) ---
     _RE_DOCKER_TS_PREFIX = re.compile(r"^\s*\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s+")
 
-    # --- scheduler NEXT parsing ---
     _RE_SCHED_NEXT = re.compile(
-        r"""(?P<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3})\s+.*?\bazurmixd\.scheduler\b.*?\bNEXT\s*\|\s*title="(?P<title>[^"]*)"\s*\|\s*playlist="(?P<playlist>[^"]*)"""  # noqa: E501
+        r"""(?P<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3})\s+.*?\bazurmixd\.scheduler\b.*?\bNEXT\s*\|\s*title="(?P<title>[^"]*)"\s*\|\s*playlist="(?P<playlist>[^"]*)"""
     )
 
-    # --- engine STREAM_START parsing ---
     _RE_STREAM_START = re.compile(r"\bBUS\s+STREAM_START\b.*\bsrc=playbin\b", re.IGNORECASE)
 
     def __init__(self) -> None:
@@ -67,7 +55,6 @@ class DockerClient:
 
     @staticmethod
     def _run_cmd(cmd: List[str], cwd: str, timeout_s: int = 180) -> Dict[str, Any]:
-        """Run a command and return structured output (stdout/stderr/rc)."""
         start = dt.datetime.now(dt.timezone.utc)
         try:
             p = subprocess.run(
@@ -118,21 +105,19 @@ class DockerClient:
             }
 
     def compose_down(self, azuramix_dir: str) -> Dict[str, Any]:
-        """docker compose down in azuramix_dir."""
         return self._run_cmd(["docker", "compose", "down"], cwd=azuramix_dir)
 
     def compose_up(self, azuramix_dir: str) -> Dict[str, Any]:
-        """docker compose up -d in azuramix_dir."""
         return self._run_cmd(["docker", "compose", "up", "-d"], cwd=azuramix_dir)
 
     def compose_recreate(self, azuramix_dir: str) -> Dict[str, Any]:
-        """docker compose up -d --force-recreate in azuramix_dir."""
         return self._run_cmd(["docker", "compose", "up", "-d", "--force-recreate"], cwd=azuramix_dir)
 
     def compose_update(self, azuramix_dir: str, image_ref: str) -> Dict[str, Any]:
         """docker compose down && docker image rm -f <image> || true"""
         r1 = self._run_cmd(["docker", "compose", "down"], cwd=azuramix_dir)
         r2 = self._run_cmd(["docker", "image", "rm", "-f", image_ref], cwd=azuramix_dir)
+
         # emulate "|| true" for image rm
         r2["ok"] = True
 
@@ -141,6 +126,7 @@ class DockerClient:
             "ok": ok,
             "step_down": r1,
             "step_image_rm": r2,
+            "image_ref": image_ref,
         }
 
     # ----------------------- Docker API basics -----------------------
@@ -185,7 +171,6 @@ class DockerClient:
         )
 
     def tail_logs(self, name: str, tail: int = 300) -> str:
-        """Return last N lines of container logs (best-effort)."""
         try:
             c = self.client.containers.get(name)
             raw: bytes = c.logs(tail=tail, timestamps=True)  # type: ignore[assignment]
