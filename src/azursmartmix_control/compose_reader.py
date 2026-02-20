@@ -1,105 +1,164 @@
 from __future__ import annotations
 
+import datetime as dt
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
-
-import yaml
+from typing import Any, Dict, Tuple
 
 
-def _as_kv(item: Any) -> Optional[Tuple[str, str]]:
-    """Convert docker-compose environment entries to (key, value).
-
-    Supports:
-    - ["A=1", "B=2"]
-    - {"A": "1", "B": 2}
-    - ["A"] (means inherited/empty -> we keep empty string)
-    """
-    if isinstance(item, str):
-        if "=" in item:
-            k, v = item.split("=", 1)
-            return k.strip(), v
-        return item.strip(), ""
-    return None
-
-
-def read_compose_services_env(compose_path: str) -> Dict[str, Any]:
-    """Read compose and return service->env mapping (raw, best-effort)."""
-    if not compose_path or not os.path.exists(compose_path):
-        return {
-            "present": False,
-            "path": compose_path,
-            "error": "compose file not found",
-            "services": {},
-        }
-
+def _require_yaml():
     try:
-        with open(compose_path, "r", encoding="utf-8") as f:
-            doc = yaml.safe_load(f)
+        import yaml  # type: ignore
+        return yaml
     except Exception as e:
-        return {
-            "present": True,
-            "path": compose_path,
-            "error": f"failed to read/parse yaml: {e}",
-            "services": {},
-        }
+        raise RuntimeError(
+            "Missing dependency 'pyyaml' (import yaml failed). Add pyyaml to your dependencies."
+        ) from e
 
-    services = (doc or {}).get("services") or {}
-    out: Dict[str, Any] = {}
 
-    for svc_name, svc in services.items():
-        env = (svc or {}).get("environment", None)
-        env_out: Dict[str, str] = {}
+def _normalize_env(env: Any) -> Dict[str, str]:
+    """Normalize compose 'environment' which can be:
+    - dict: {KEY: VALUE}
+    - list: ["KEY=VALUE", "KEY2=VALUE2"]
+    """
+    out: Dict[str, str] = {}
+    if env is None:
+        return out
 
-        if isinstance(env, dict):
-            for k, v in env.items():
-                env_out[str(k)] = "" if v is None else str(v)
-        elif isinstance(env, list):
-            for it in env:
-                kv = _as_kv(it)
-                if kv:
-                    k, v = kv
-                    env_out[k] = v
-        elif env is None:
-            env_out = {}
-        else:
-            # weird type
-            env_out = {"__error__": f"unsupported environment type: {type(env)}"}
+    if isinstance(env, dict):
+        for k, v in env.items():
+            if k is None:
+                continue
+            kk = str(k)
+            vv = "" if v is None else str(v)
+            out[kk] = vv
+        return out
 
-        out[str(svc_name)] = {"environment": env_out}
+    if isinstance(env, list):
+        for item in env:
+            if item is None:
+                continue
+            s = str(item)
+            if "=" in s:
+                k, v = s.split("=", 1)
+                out[str(k)] = str(v)
+            else:
+                out[s] = ""
+        return out
 
+    # unknown type
+    return out
+
+
+def _denormalize_env(env_map: Dict[str, str], prefer: str = "dict") -> Any:
+    """Convert back to compose environment format.
+    prefer='dict' keeps a mapping (more readable).
+    """
+    if prefer == "list":
+        return [f"{k}={v}" for k, v in env_map.items()]
+    return dict(env_map)
+
+
+def _load_compose(path: str) -> Dict[str, Any]:
+    yaml = _require_yaml()
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"compose file not found: {path}")
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"compose root is not a mapping: {path}")
+    return data
+
+
+def _dump_compose(path: str, data: Dict[str, Any]) -> None:
+    yaml = _require_yaml()
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        yaml.safe_dump(
+            data,
+            f,
+            sort_keys=False,
+            default_flow_style=False,
+            allow_unicode=True,
+        )
+    os.replace(tmp, path)
+
+
+def _backup_file(path: str) -> str:
+    ts = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    bak = f"{path}.bak-{ts}"
+    with open(path, "rb") as src, open(bak, "wb") as dst:
+        dst.write(src.read())
+    return bak
+
+
+def get_service_env(compose_path: str, service_name: str) -> Dict[str, Any]:
+    """Existing helper used by UI (read-only). Returns structured env from compose_path."""
+    data = _load_compose(compose_path)
+    services = data.get("services") or {}
+    if not isinstance(services, dict):
+        services = {}
+
+    svc = services.get(service_name) or {}
+    if not isinstance(svc, dict):
+        svc = {}
+
+    env = _normalize_env(svc.get("environment"))
     return {
-        "present": True,
-        "path": compose_path,
-        "error": None,
-        "services": out,
+        "ok": True,
+        "compose_path": compose_path,
+        "service": service_name,
+        "environment": env,
+        "count": len(env),
     }
 
 
-def get_service_env(compose_path: str, service: str) -> Dict[str, Any]:
-    """Return env vars of a specific service."""
-    data = read_compose_services_env(compose_path)
-    if not data.get("present"):
-        return data
+def get_service_env_from_host_compose(host_compose_path: str, service_name: str) -> Dict[str, Any]:
+    """Read env from host compose file (mounted into container)."""
+    return get_service_env(host_compose_path, service_name)
 
-    services = data.get("services") or {}
-    if service not in services:
-        return {
-            "present": True,
-            "path": compose_path,
-            "error": None,
-            "service": service,
-            "found": False,
-            "environment": {},
-            "available_services": sorted(list(services.keys())),
-        }
 
-    env = (services[service] or {}).get("environment") or {}
+def set_service_env_in_host_compose(
+    host_compose_path: str,
+    service_name: str,
+    env_map: Dict[str, str],
+    env_format_prefer: str = "dict",
+) -> Dict[str, Any]:
+    """Write env_map into services[service_name].environment of the compose file.
+
+    - Creates services/service if missing.
+    - Saves backup before write.
+    """
+    data = _load_compose(host_compose_path)
+    services = data.get("services")
+    if not isinstance(services, dict):
+        services = {}
+        data["services"] = services
+
+    svc = services.get(service_name)
+    if not isinstance(svc, dict):
+        svc = {}
+        services[service_name] = svc
+
+    # normalize incoming values to strings
+    clean: Dict[str, str] = {}
+    for k, v in (env_map or {}).items():
+        if k is None:
+            continue
+        kk = str(k).strip()
+        if not kk:
+            continue
+        vv = "" if v is None else str(v)
+        clean[kk] = vv
+
+    # write
+    backup = _backup_file(host_compose_path)
+    svc["environment"] = _denormalize_env(clean, prefer=env_format_prefer)
+    _dump_compose(host_compose_path, data)
+
     return {
-        "present": True,
-        "path": compose_path,
-        "error": None,
-        "service": service,
-        "found": True,
-        "environment": env,
-        "available_services": sorted(list(services.keys())),
+        "ok": True,
+        "compose_path": host_compose_path,
+        "service": service_name,
+        "count": len(clean),
+        "backup": backup,
     }
