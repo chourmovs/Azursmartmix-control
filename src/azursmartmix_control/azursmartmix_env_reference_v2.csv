@@ -41,7 +41,7 @@ PREPROCESS_FFMPEG_THREADS,Preprocess & Resources,secondary,FFmpeg threads per jo
 PREPROCESS_FORMAT,Preprocess & Resources,primary,Preprocess output format,Format for cached files ('wav' or 'mp3'); wav avoids lossy re-encode during trimming/packs but costs more disk.
 PREPROCESS_IONICE_CLASS,Preprocess & Resources,secondary,FFmpeg IO scheduling class,"Sets ionice class for ffmpeg disk IO (e.g., 2=best-effort) when ionice is available; helps avoid IO starvation."
 PREPROCESS_IONICE_LEVEL,Preprocess & Resources,secondary,FFmpeg IO scheduling level,"Sets ionice level within class (0-7); higher is lower priority, reducing impact on other processes."
-PREPROCESS_MAX_S,Preprocess & Resources,secondary,Maximum safe duration (seconds),Hard cap for produced safe files; trims/limits long tracks to this duration to guarantee predictable transitions and pack alignment.
+PREPROCESS_MAX_S,Preprocess & Resources,primary,Maximum safe duration (seconds),Hard cap for produced safe files; trims/limits long tracks to this duration to guarantee predictable transitions and pack alignment.
 PREPROCESS_MP3_BITRATE_KBPS,Preprocess & Resources,secondary,Preprocess MP3 bitrate (kbps),"If PREPROCESS_FORMAT=mp3, bitrate used for cached files; wav is recommended for lossless trimming/packs."
 PREPROCESS_MP3_CBR,Preprocess & Resources,primary,Preprocess MP3 CBR enable,"If PREPROCESS_FORMAT=mp3, toggles constant bitrate mode for cached outputs."
 PREPROCESS_NICE,Preprocess & Resources,secondary,FFmpeg process nice level,Adjusts CPU scheduling priority (higher nice = lower priority) for ffmpeg jobs to protect realtime playback.
@@ -89,6 +89,7 @@ MP3_BITRATE_KBPS,Output (Icecast & Encoding),secondary,MP3 bitrate (kbps),"lamem
 MP3_CBR,Output (Icecast & Encoding),primary,MP3 constant bitrate enable,"When true, forces CBR mode in MP3 encoder; improves predictability for some clients at the cost of efficiency on complex audio."
 SAMPLE_RATE,Output (Icecast & Encoding),secondary,Output sample rate (Hz),"Target PCM sample rate for the GStreamer pipeline and encoding stage (e.g., 44100). Affects resampling cost and potential HF roll-off if downsampled."
 SWITCH_GUARD_HOLD_S,Other,secondary,Switch guard hold time (seconds),Minimum hold time during which additional set_uri calls are ignored (reentrancy guard); reduces accidental double-switch in fast callbacks.
+,,,,
 ,,,,
 ,,,,
 ,,,,
