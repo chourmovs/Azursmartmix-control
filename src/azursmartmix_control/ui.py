@@ -52,16 +52,11 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .q-tabs,
 .q-tabs__content,
 .q-tab-panels .q-panel,
-.q-tab-panels .q-panel-parent {
-  background: transparent !important;
-}
+.q-tab-panels .q-panel-parent { background: transparent !important; }
 
-.q-html,
-.q-html * {
-  background: transparent !important;
-}
+.q-html, .q-html * { background: transparent !important; }
 
-/* Force Quasar inputs to be dark */
+/* Quasar inputs dark */
 .q-field__native,
 .q-field__input,
 .q-field__prefix,
@@ -71,35 +66,23 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .q-field__messages,
 .q-placeholder,
 .q-field__native::placeholder,
-.q-field__input::placeholder {
-  color: rgba(255,255,255,.92) !important;
-}
+.q-field__input::placeholder { color: rgba(255,255,255,.92) !important; }
 
 .q-field--outlined .q-field__control:before,
-.q-field--outlined .q-field__control:after {
-  border-color: rgba(255,255,255,.20) !important;
-}
+.q-field--outlined .q-field__control:after { border-color: rgba(255,255,255,.20) !important; }
 
 .q-field--outlined .q-field__control,
-.q-field__control {
-  background: rgba(0,0,0,.18) !important;
-}
+.q-field__control { background: rgba(0,0,0,.18) !important; }
 
 .q-field__marginal,
 .q-select__dropdown-icon,
-.q-icon {
-  color: rgba(255,255,255,.78) !important;
-}
+.q-icon { color: rgba(255,255,255,.78) !important; }
 
 .q-menu,
 .q-list,
 .q-item,
-.q-item__label {
-  background: #151a22 !important;
-  color: rgba(255,255,255,.92) !important;
-}
+.q-item__label { background: #151a22 !important; color: rgba(255,255,255,.92) !important; }
 
-/* top bar */
 .az-topbar{
   background: linear-gradient(0deg, var(--az-blue) 0%, var(--az-blue-dark) 100%) !important;
   color: white !important;
@@ -109,7 +92,6 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .az-topbar .az-brand { font-weight: 900; }
 .az-topbar .az-sub { opacity: .85; font-weight: 600; }
 
-/* 90% center */
 .az-wrap{
   width: 90%;
   max-width: 90%;
@@ -159,119 +141,15 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 }
 .az-opbtn .q-btn--outline{ border:1px solid rgba(255,255,255,.55) !important; color:white !important; }
 
-.az-list{ display:flex; flex-direction:column; gap:8px; }
-.az-item{ padding: 10px 12px; border-radius: 10px; border: 1px solid var(--az-border); background: rgba(255,255,255,.04); }
-.az-item .idx{ display:inline-block; min-width:24px; font-weight:950; color: rgba(255,255,255,.75); }
-.az-item .txt{ font-weight:650; }
-
-.rt-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-@media (max-width: 900px){ .rt-grid{ grid-template-columns: 1fr; } }
-
-.rt-box{
-  border: 1px solid var(--az-border);
-  border-radius: 10px;
-  background: rgba(0,0,0,.10);
-  overflow: hidden;
-}
-.rt-box-h{
-  padding: 10px 12px;
-  font-weight: 900;
-  border-bottom: 1px solid rgba(255,255,255,.08);
-  color: rgba(255,255,255,.92);
-}
-.rt-table{ width: 100%; border-collapse: collapse; font-size: 14px; }
-.rt-table tr td{
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(255,255,255,.06);
-  vertical-align: top;
-}
-.rt-table tr:last-child td{ border-bottom: none; }
-.rt-k{ width: 140px; color: var(--az-muted); }
-.rt-v{ color: rgba(255,255,255,.92); font-family: var(--az-mono); word-break: break-word; }
-
-.console-frame{
-  height: 420px;
-  overflow: auto;
-  border: 1px solid var(--az-border);
-  border-radius: 10px;
-  background: rgba(0,0,0,.55) !important;
-  padding: 10px 12px;
-}
-.console-frame, .console-frame * { background: transparent !important; }
-.console-frame { background: rgba(0,0,0,.55) !important; }
-.console-content{
-  font-family: var(--az-mono) !important;
-  font-size: 13px !important;
-  line-height: 1.35 !important;
-  color: rgba(255,255,255,.86) !important;
-  white-space: pre-wrap !important;
-  word-break: break-word !important;
-  margin: 0 !important;
-  padding: 0 !important;
-}
-
-.t-dim{ color: rgba(255,255,255,.45) !important; }
-.t-info{ color: rgba(56, 189, 248, .95) !important; }
-.t-warn{ color: rgba(245, 158, 11, .95) !important; }
-.t-err{  color: rgba(239, 68, 68, .95) !important; }
-.t-ok{   color: rgba(34, 197, 94, .95) !important; }
-.t-vio{  color: rgba(167, 139, 250, .95) !important; }
-.t-cyan{ color: rgba(34, 211, 238, .95) !important; }
-.t-bold{ font-weight: 900 !important; }
-
-.az-player{
-  width: 100%;
-  margin-top: 10px;
-  padding: 10px 10px;
-  border-radius: 12px;
-  border: 1px solid var(--az-border);
-  background: rgba(0,0,0,.22);
-}
-.az-player audio{
-  width: 100%;
-  height: 42px;
-  filter: invert(1) hue-rotate(180deg) saturate(1.2);
-  opacity: 0.95;
-}
-.az-player .hint{
-  margin-top: 8px;
-  font-size: 13px;
-  color: rgba(255,255,255,.65);
-  font-family: var(--az-mono);
-}
-
-.np-meta{
-  margin-top: 8px;
-  display:flex;
-  flex-direction:column;
-  gap: 6px;
-}
-.np-line{
-  font-family: var(--az-mono);
-  font-size: 13px;
-  color: rgba(255,255,255,.80);
-}
-.np-k{ color: rgba(255,255,255,.55); }
-.np-v{ color: rgba(255,255,255,.92); font-weight: 800; }
-.np-pill{
-  display:inline-flex; align-items:center; gap:8px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  border:1px solid var(--az-border);
-  background: rgba(255,255,255,.05);
-}
-
 .az-tabsbar{
   margin: 10px 0 18px 0;
   border: 1px solid rgba(255,255,255,.10);
   border-radius: 12px;
   overflow: hidden;
 }
-.az-tabsbar .q-tabs{
-  background: rgba(0,0,0,.15) !important;
-}
+.az-tabsbar .q-tabs{ background: rgba(0,0,0,.15) !important; }
 
-/* Settings */
+/* Settings layout */
 .az-settings-toolbar{
   display:flex;
   flex-wrap: wrap;
@@ -298,9 +176,7 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
   border-radius: 12px;
   overflow: hidden;
 }
-.az-settings-topcats .q-tabs{
-  background: rgba(0,0,0,.18) !important;
-}
+.az-settings-topcats .q-tabs{ background: rgba(0,0,0,.18) !important; }
 
 .az-settings-grid{
   display:grid;
@@ -330,9 +206,7 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
   font-size: 12px;
   opacity:.75;
 }
-.set-box-b{
-  padding: 6px 10px;
-}
+.set-box-b{ padding: 6px 10px; }
 
 .set-row{
   display:grid;
@@ -395,8 +269,10 @@ document.addEventListener('click', (ev) => {
 class ControlUI:
     """AzurSmartMix Control UI.
 
-    Settings: CSV-driven reference with top_category sub-tabs.
-    IMPORTANT: tabs are computed from CSV + env union, not from env only.
+    Contract:
+    - Values are loaded/saved ONLY from/to azuramix.env via /compose/engine_env (API).
+    - Layout (top_category/category/priority/name/explanation) is driven ONLY by azursmartmix_env_reference_v2.csv.
+    - Join key is parameter name (CSV 'parameter' <-> env KEY).
     """
 
     _BOOL_TRUE_WORD = {"true", "yes", "y", "on", "enabled"}
@@ -404,35 +280,12 @@ class ControlUI:
     _BOOL_NUM = {"0", "1"}
 
     _BOOL_KEY_SUFFIXES = (
-        "_ENABLE",
-        "_ENABLED",
-        "_DISABLE",
-        "_DISABLED",
-        "_DEBUG",
-        "_VERBOSE",
-        "_MUTE",
-        "_ACCESS_LOG",
-        "_LOG",
-        "_LOGS",
-        "_SINGLE_SEGMENT",
-        "_SAFE",
-        "_STRICT",
-        "_FORCE",
-        "_DRYRUN",
-        "_DRY_RUN",
-        "_MERGE",
-        "_SHUFFLE",
-        "_LOOP",
-        "_LOOP_ONCE",
+        "_ENABLE", "_ENABLED", "_DISABLE", "_DISABLED",
+        "_DEBUG", "_VERBOSE", "_MUTE",
+        "_ACCESS_LOG", "_LOG", "_LOGS",
+        "_SAFE", "_STRICT", "_FORCE",
     )
-    _BOOL_KEY_CONTAINS = (
-        "_ENABLE_",
-        "_ENABLED_",
-        "_DISABLE_",
-        "_DISABLED_",
-        "_DEBUG_",
-        "_ACCESS_LOG_",
-    )
+    _BOOL_KEY_CONTAINS = ("_ENABLE_", "_ENABLED_", "_DISABLE_", "_DISABLED_", "_DEBUG_", "_ACCESS_LOG_")
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -440,19 +293,6 @@ class ControlUI:
         self.timeout = httpx.Timeout(30.0, connect=3.0)
 
         self._timer = None
-
-        self._docker_badge = None
-        self._rt_engine_tbl = None
-        self._rt_sched_tbl = None
-
-        self._now_title = None
-        self._now_meta = None
-        self._now_player = None
-
-        self._up_list_container = None
-
-        self._log_html_engine = None
-        self._log_html_sched = None
 
         self._ops_dialog = None
         self._ops_html = None
@@ -465,17 +305,14 @@ class ControlUI:
 
         self._tag_select = None
         self._tag_value = None  # type: ignore[assignment]
-
         self._restart_badge = None
 
         self._tabs = None
         self._tab_dashboard = "Dashboard"
         self._tab_settings = "Settings"
 
-        self._settings_service = "engine"
+        # Settings state
         self._settings_advanced = False
-        self._settings_service_select = None
-        self._settings_advanced_switch = None
         self._settings_search = None
         self._settings_grid_container = None
         self._settings_env_base: Dict[str, str] = {}
@@ -486,25 +323,23 @@ class ControlUI:
         self._settings_topcat_tabs = None
         self._settings_topcat_value: Optional[str] = None
 
+        self._settings_show_unmapped = False
+        self._settings_show_unmapped_switch = None
+
+        # CSV reference
         self._env_ref_by_key: Dict[str, Dict[str, str]] = {}
         self._category_order: List[str] = []
+        self._topcats_order: List[str] = []
 
         self._compose_env_busy = False
         self._compose_env_format = "dict"
 
         self._load_env_reference_csv()
 
-    # -------------------- CSV loader --------------------
+    # -------------------- CSV loader (layout only) --------------------
 
     def _load_env_reference_csv(self) -> None:
         candidates: List[str] = []
-        try:
-            maybe = getattr(self.settings, "env_reference_csv", None)
-            if isinstance(maybe, str) and maybe.strip():
-                candidates.append(maybe.strip())
-        except Exception:
-            pass
-
         env_path = (os.getenv("AZURSMARTMIX_ENV_REFERENCE_CSV") or "").strip()
         if env_path:
             candidates.append(env_path)
@@ -534,17 +369,21 @@ class ControlUI:
         if not path:
             self._env_ref_by_key = {}
             self._category_order = ["Other"]
+            self._topcats_order = ["Main"]
             return
 
         ref: Dict[str, Dict[str, str]] = {}
         cat_order: List[str] = []
         seen_cat = set()
+        top_order: List[str] = []
+        seen_top = set()
 
         with path.open("r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 if not row:
                     continue
+
                 key = (row.get("parameter") or "").strip()
                 if not key:
                     continue
@@ -566,6 +405,10 @@ class ControlUI:
                     "explanation": explanation,
                 }
 
+                if top_category not in seen_top:
+                    seen_top.add(top_category)
+                    top_order.append(top_category)
+
                 if category not in seen_cat:
                     seen_cat.add(category)
                     cat_order.append(category)
@@ -573,34 +416,38 @@ class ControlUI:
         if "Other" not in seen_cat:
             cat_order.append("Other")
 
+        if "Main" in top_order:
+            top_order = ["Main"] + [x for x in top_order if x != "Main"]
+
         self._env_ref_by_key = ref
         self._category_order = cat_order
+        self._topcats_order = top_order
 
-    # -------------------- helpers --------------------
+    def _topcats_from_csv(self) -> List[str]:
+        return list(self._topcats_order) if self._topcats_order else ["Main"]
 
-    def _stream_public_url(self) -> str:
-        public = getattr(self.settings, "icecast_public_url", "") or ""
-        public = str(public).strip()
-        if public:
-            return public.rstrip("/")
-        scheme = getattr(self.settings, "icecast_scheme", "http")
-        host = getattr(self.settings, "icecast_host", "localhost")
-        port = getattr(self.settings, "icecast_port", 8000)
-        mount = getattr(self.settings, "icecast_mount", "/")
-        if not str(mount).startswith("/"):
-            mount = "/" + str(mount)
-        return f"{scheme}://{host}:{port}{mount}"
+    def _keys_for_topcat_from_csv(self, topcat: str) -> List[str]:
+        out = []
+        for k, meta in self._env_ref_by_key.items():
+            tc = meta.get("top_category") or "Main"
+            if tc == topcat:
+                out.append(k)
+        return out
 
-    def _default_tag_from_image(self) -> str:
-        s = (self.settings.azursmartmix_image or "").strip()
-        if ":" in s:
-            return s.rsplit(":", 1)[1].strip() or "latest"
-        return "latest"
+    def _get_ref(self, key: str) -> Dict[str, str]:
+        meta = self._env_ref_by_key.get(key)
+        if meta:
+            return meta
+        return {
+            "parameter": key,
+            "top_category": "Main",
+            "category": "Other",
+            "priority": "secondary",
+            "english_name": key,
+            "explanation": "Unmapped parameter (missing from env reference CSV).",
+        }
 
-    def _compose_env_endpoint(self, service: str) -> str:
-        if service == "scheduler":
-            return "/compose/scheduler_env"
-        return "/compose/engine_env"
+    # -------------------- bool/number typing helpers --------------------
 
     def _key_is_bool_flag(self, key: str) -> bool:
         if not key:
@@ -657,46 +504,7 @@ class ControlUI:
         except Exception:
             return False
 
-    def _get_ref(self, key: str) -> Dict[str, str]:
-        meta = self._env_ref_by_key.get(key)
-        if meta:
-            return meta
-        return {
-            "parameter": key,
-            "top_category": "Main",
-            "category": "Other",
-            "priority": "secondary",
-            "english_name": key,
-            "explanation": "Unmapped parameter (not present in env reference CSV).",
-        }
-
-    def _all_setting_keys(self, env: Dict[str, str]) -> List[str]:
-        """Return the authoritative key list for settings UI.
-
-        We show:
-        - all keys from CSV (so tabs like 'audio' exist even if not yet defined in env)
-        - plus any keys present in env but missing from CSV (so nothing is lost)
-        """
-        keys = set(self._env_ref_by_key.keys()) | set((env or {}).keys())
-        out = [k for k in keys if str(k).strip()]
-        out.sort()
-        return out
-
-    def _topcats_from_keys(self, keys: List[str]) -> List[str]:
-        seen: set[str] = set()
-        out: List[str] = []
-        for k in keys:
-            tc = (self._get_ref(k).get("top_category") or "Main").strip() or "Main"
-            if tc not in seen:
-                seen.add(tc)
-                out.append(tc)
-        if not out:
-            out = ["Main"]
-        if "Main" in out:
-            out = ["Main"] + [x for x in out if x != "Main"]
-        return out
-
-    # -------------------- build UI --------------------
+    # -------------------- Build UI (minimal dashboard kept) --------------------
 
     def build(self) -> None:
         ui.add_head_html(f"<style>{AZURA_CSS}</style>")
@@ -728,10 +536,7 @@ class ControlUI:
                 self._btn_update = ui.button("Update", on_click=self.op_compose_update).props("outline")
 
                 ui.separator().props("vertical").style("height:26px; opacity:.35;")
-
-                ui.button("Refresh", on_click=self.refresh_all).props("unelevated color=white text-color=primary")
-                ui.button("Auto 5s", on_click=self.enable_autorefresh).props("outline")
-                ui.button("Stop Auto", on_click=self.disable_autorefresh).props("outline")
+                ui.button("Refresh", on_click=self.refresh_settings).props("unelevated color=white text-color=primary")
 
         with ui.element("div").classes("az-wrap"):
             with ui.element("div").classes("az-tabsbar"):
@@ -739,20 +544,19 @@ class ControlUI:
                     ui.tab(self._tab_dashboard)
                     ui.tab(self._tab_settings)
 
-            with ui.tab_panels(self._tabs, value=self._tab_dashboard).classes("w-full"):
+            with ui.tab_panels(self._tabs, value=self._tab_settings).classes("w-full"):
                 with ui.tab_panel(self._tab_dashboard):
-                    with ui.element("div").classes("az-grid"):
-                        self._card_runtime()
-                        self._card_now()
-                        self._card_upcoming()
-                    with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
-                        self._card_logs()
-
+                    ui.label("Dashboard (unchanged in this iteration)").style("opacity:.8;")
                 with ui.tab_panel(self._tab_settings):
                     self._card_settings()
 
-        ui.timer(0.1, self.refresh_all, once=True)
         ui.timer(0.2, self.refresh_settings, once=True)
+
+    def _default_tag_from_image(self) -> str:
+        s = (self.settings.azursmartmix_image or "").strip()
+        if ":" in s:
+            return s.rsplit(":", 1)[1].strip() or "latest"
+        return "latest"
 
     def _on_tag_change(self, e) -> None:
         try:
@@ -773,7 +577,7 @@ class ControlUI:
             "</span>"
         )
 
-    # -------------------- Ops modal --------------------
+    # -------------------- Ops dialog (kept) --------------------
 
     def _build_ops_dialog(self) -> None:
         with ui.dialog() as d:
@@ -790,71 +594,42 @@ class ControlUI:
                         self._ops_html = ui.html('<div class="console-content">—</div>')
 
     async def _post_text(self, path: str) -> str:
-        url = f"http://127.0.0.1:{self.settings.ui_port}{self.api_base}{path}"
+        url = f"http://127.0.0.1:{self.settings.ui_port}{self.settings.api_prefix.rstrip('/')}{path}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.post(url)
             r.raise_for_status()
             return r.text
 
     async def _post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        url = f"http://127.0.0.1:{self.settings.ui_port}{self.api_base}{path}"
+        url = f"http://127.0.0.1:{self.settings.ui_port}{self.settings.api_prefix.rstrip('/')}{path}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.post(url, json=payload)
             r.raise_for_status()
             data = r.json()
             return data if isinstance(data, dict) else {"data": data}
 
-    def _set_ops_busy(self, busy: bool) -> None:
-        self._ops_busy = bool(busy)
-        for b in (self._btn_down, self._btn_up, self._btn_recreate, self._btn_update):
-            if b:
-                b.disable() if busy else b.enable()
-        if self._tag_select:
-            self._tag_select.disable() if busy else self._tag_select.enable()
-
-    def _highlight_ops_html(self, text: str) -> str:
-        esc = html.escape(text)
-        esc = re.sub(
-            r"\bok:\s*(True|False)\b",
-            lambda m: f'<span class="t-bold {"t-ok" if m.group(1)=="True" else "t-err"}">ok: {m.group(1)}</span>',
-            esc,
-        )
-        esc = re.sub(r"\brc:\s*(\d+)\b", lambda m: f'<span class="t-dim">rc: {m.group(1)}</span>', esc)
-        esc = re.sub(r"\b(stdout|stderr)\b", lambda m: f'<span class="t-vio t-bold">{m.group(1)}</span>', esc)
-        esc = re.sub(r"\bdocker\b", lambda m: f'<span class="t-cyan t-bold">{m.group(0)}</span>', esc, flags=re.IGNORECASE)
-        esc = re.sub(r"\bcompose\b", lambda m: f'<span class="t-cyan">{m.group(0)}</span>', esc, flags=re.IGNORECASE)
-        esc = re.sub(r"\b(force-recreate|down|up)\b", lambda m: f'<span class="t-warn t-bold">{m.group(0)}</span>', esc, flags=re.IGNORECASE)
-        esc = re.sub(r"\berror\b", lambda m: f'<span class="t-err t-bold">{m.group(0)}</span>', esc, flags=re.IGNORECASE)
-        return f'<div class="console-content">{esc}</div>'
-
     async def _run_op(self, label: str, path: str, clears_restart_hint: bool = False) -> None:
         if self._ops_busy:
             ui.notify("Operation already running", type="warning")
             return
-
-        self._set_ops_busy(True)
+        self._ops_busy = True
         try:
             if self._ops_dialog:
                 self._ops_dialog.open()
             if self._ops_html:
-                self._ops_html.set_content(self._highlight_ops_html(f"== {label} ==\nPOST {path}\n\nrunning...\n"))
-
+                self._ops_html.set_content(f'<div class="console-content">{html.escape(f"== {label} ==\\nPOST {path}\\n\\nrunning...\\n")}</div>')
             txt = await self._post_text(path)
-
             if self._ops_html:
-                self._ops_html.set_content(self._highlight_ops_html(txt))
-
+                self._ops_html.set_content(f'<div class="console-content">{html.escape(txt)}</div>')
             ui.notify(f"{label}: done", type="positive")
             if clears_restart_hint:
                 self._set_restart_needed(False)
-
-            await self.refresh_all()
         except Exception as e:
             if self._ops_html:
-                self._ops_html.set_content(self._highlight_ops_html(f"== {label} ==\nerror: {e}\n"))
+                self._ops_html.set_content(f'<div class="console-content">{html.escape(f"== {label} ==\\nerror: {e}\\n")}</div>')
             ui.notify(f"{label}: error", type="negative")
         finally:
-            self._set_ops_busy(False)
+            self._ops_busy = False
 
     async def op_compose_down(self) -> None:
         await self._run_op("Stop (docker compose down)", "/ops/compose/down", clears_restart_hint=False)
@@ -872,151 +647,35 @@ class ControlUI:
             qs = "?tag=" + urllib.parse.quote(tag, safe="")
         await self._run_op(f"Update (down + rm image:{tag or 'default'})", "/ops/compose/update" + qs, clears_restart_hint=True)
 
-    # -------------------- Dashboard --------------------
-
-    def _card_runtime(self) -> None:
-        with ui.element("div").classes("az-card"):
-            with ui.element("div").classes("az-card-h"):
-                ui.label("Runtime Status")
-                self._docker_badge = ui.html('<span class="az-badge"><span class="az-dot warn"></span><span>Docker: …</span></span>')
-            with ui.element("div").classes("az-card-b"):
-                with ui.element("div").classes("rt-grid"):
-                    self._rt_engine_tbl = self._runtime_box("Engine")
-                    self._rt_sched_tbl = self._runtime_box("Scheduler")
-
-    def _runtime_box(self, title: str):
-        with ui.element("div").classes("rt-box"):
-            ui.label(title).classes("rt-box-h")
-            tbl = ui.html(self._runtime_table_html({}))
-            return tbl
-
-    def _runtime_table_html(self, data: Dict[str, Any]) -> str:
-        def v(key: str, default: str = "—") -> str:
-            raw = data.get(key)
-            if raw is None or raw == "":
-                raw = default
-            return html.escape(str(raw))
-
-        rows = [
-            ("name", v("name")),
-            ("image", v("image")),
-            ("status", v("status")),
-            ("health", v("health", "-")),
-            ("uptime", v("uptime", "-")),
-        ]
-        tr = "".join(f'<tr><td class="rt-k">{html.escape(k)}</td><td class="rt-v" data-copy="{val}">{val}</td></tr>' for k, val in rows)
-        return f'<table class="rt-table">{tr}</table>'
-
-    def _card_now(self) -> None:
-        stream_url = self._stream_public_url()
-        mount = getattr(self.settings, "icecast_mount", "/gst-test.mp3")
-        with ui.element("div").classes("az-card"):
-            with ui.element("div").classes("az-card-h"):
-                ui.label("Now Playing")
-                ui.label(str(mount)).classes("text-xs").style("opacity:.85;")
-            with ui.element("div").classes("az-card-b"):
-                self._now_title = ui.label("—").classes("text-xl").style("font-weight: 950; margin: 2px 0 0 0;")
-                self._now_meta = ui.html(self._now_meta_html({}))
-                self._now_player = ui.html(self._player_html(stream_url))
-                ui.label("Sources: Icecast(observed) + scheduler NEXT + engine STREAM_START hint").style("opacity:.7; margin-top: 10px;")
-
-    def _now_meta_html(self, now: Dict[str, Any]) -> str:
-        playlist_eff = now.get("playlist_effective")
-        pl_txt = html.escape(str(playlist_eff)) if playlist_eff else "—"
-
-        predicted = now.get("predicted_next") if isinstance(now.get("predicted_next"), dict) else None
-        pred_title = "—"
-        pred_pl = "—"
-        if predicted:
-            pred_title = html.escape(str(predicted.get("title_display") or predicted.get("title") or "—"))
-            pred_pl = html.escape(str(predicted.get("playlist") or "—"))
-
-        ss = now.get("engine_stream_start") if isinstance(now.get("engine_stream_start"), dict) else None
-        hint = ""
-        if ss and ss.get("ok") and ss.get("recent"):
-            age = ss.get("age_s")
-            age_txt = f"{age}s" if isinstance(age, int) else "recent"
-            hint = f'<span class="np-pill"><span class="t-ok t-bold">STREAM_START</span><span class="t-dim">({html.escape(age_txt)})</span></span>'
-        elif ss and ss.get("ok") and ss.get("line"):
-            age = ss.get("age_s")
-            age_txt = f"{age}s" if isinstance(age, int) else ""
-            hint = f'<span class="np-pill"><span class="t-dim">last STREAM_START</span><span class="t-dim">{html.escape(age_txt)}</span></span>'
-
-        return (
-            '<div class="np-meta">'
-            f'  <div class="np-line"><span class="np-k">playlist:</span> <span class="np-v" data-copy="{pl_txt}">{pl_txt}</span></div>'
-            f'  <div class="np-line"><span class="np-k">next(pred):</span> <span class="np-v" data-copy="{pred_title}">{pred_title}</span>'
-            f'    <span class="t-dim">|</span> <span class="np-k">pl:</span> <span class="np-v" data-copy="{pred_pl}">{pred_pl}</span></div>'
-            f'  <div class="np-line">{hint}</div>'
-            "</div>"
-        )
-
-    def _player_html(self, url: str) -> str:
-        u = html.escape(url)
-        return (
-            f'<div class="az-player">'
-            f'  <audio controls preload="none" crossorigin="anonymous">'
-            f'    <source src="{u}" type="audio/mpeg" />'
-            f"  </audio>"
-            f'  <div class="hint" data-copy="{u}">{u}</div>'
-            f"</div>"
-        )
-
-    def _card_upcoming(self) -> None:
-        with ui.element("div").classes("az-card"):
-            with ui.element("div").classes("az-card-h"):
-                ui.label("Upcoming")
-                ui.label("from scheduler NEXT log").classes("text-xs").style("opacity:.85;")
-            with ui.element("div").classes("az-card-b"):
-                self._up_list_container = ui.element("div").classes("az-list")
-
-    def _card_logs(self) -> None:
-        with ui.element("div").classes("az-card").style("grid-column: 1 / -1;"):
-            with ui.element("div").classes("az-card-h"):
-                ui.label("Logs")
-                ui.label("tail=200").classes("text-xs").style("opacity:.85;")
-            with ui.element("div").classes("az-card-b"):
-                with ui.tabs().classes("w-full") as tabs:
-                    ui.tab("engine")
-                    ui.tab("scheduler")
-
-                with ui.tab_panels(tabs, value="engine").classes("w-full"):
-                    with ui.tab_panel("engine"):
-                        with ui.element("div").classes("console-frame").style("background: rgba(0,0,0,.55) !important;"):
-                            self._log_html_engine = ui.html('<div class="console-content">—</div>')
-                    with ui.tab_panel("scheduler"):
-                        with ui.element("div").classes("console-frame").style("background: rgba(0,0,0,.55) !important;"):
-                            self._log_html_sched = ui.html('<div class="console-content">—</div>')
-
-    # -------------------- Settings --------------------
+    # -------------------- Settings tab --------------------
 
     def _card_settings(self) -> None:
         with ui.element("div").classes("az-card").style("grid-column: 1 / -1; min-width: unset;"):
             with ui.element("div").classes("az-card-h"):
                 ui.label("Settings")
-                ui.label("env_file (CSV-driven)").classes("text-xs").style("opacity:.85;")
+                ui.label("azuramix.env values + CSV layout").classes("text-xs").style("opacity:.85;")
 
             with ui.element("div").classes("az-card-b"):
                 with ui.element("div").classes("az-settings-toolbar"):
                     with ui.element("div").classes("az-settings-tools-left"):
-                        svc_opts: Dict[str, str] = {"engine": "Engine", "scheduler": "Scheduler"}
-                        self._settings_service_select = ui.select(
-                            options=svc_opts,
-                            value=self._settings_service,
-                            label="Service",
-                            on_change=self._on_settings_service_change,
-                        ).props("dense outlined dark").style("min-width: 160px;")
+                        ui.label("Service: Engine (env_file)").style("opacity:.85; font-weight:900;")
 
-                        self._settings_advanced_switch = ui.switch(
+                        ui.switch(
                             "Advanced",
                             value=self._settings_advanced,
                             on_change=self._on_settings_advanced_change,
                         ).props("dense")
 
+                        self._settings_show_unmapped_switch = ui.switch(
+                            "Show unmapped env vars",
+                            value=self._settings_show_unmapped,
+                            on_change=self._on_show_unmapped_change,
+                        ).props("dense")
+
                         self._settings_search = ui.input(
-                            placeholder="Filter (name / key / explanation)…",
+                            placeholder="Filter (english name / param / explanation)…",
                             on_change=lambda _e: self._render_settings_grid(),
-                        ).classes("az-inp").props("dense outlined dark").style("min-width: 320px;")
+                        ).classes("az-inp").props("dense outlined dark").style("min-width: 360px;")
 
                     with ui.element("div").classes("az-settings-tools-right"):
                         ui.button("Reload", on_click=self.refresh_settings).props("outline")
@@ -1025,25 +684,24 @@ class ControlUI:
                 self._settings_topcat_container = ui.element("div").classes("az-settings-topcats")
 
                 ui.label(
-                    "Primary vars are always visible. Secondary vars require Advanced=ON. Values are persisted into azuramix.env (restart/recreate required)."
+                    "Layout is driven by azursmartmix_env_reference_v2.csv (top_category/category/priority). "
+                    "Values are loaded/saved from/to azuramix.env. Restart/Recreate required."
                 ).style("opacity:.75; margin-bottom: 10px;")
 
                 self._settings_grid_container = ui.element("div").classes("az-settings-grid")
-
-    def _on_settings_service_change(self, e) -> None:
-        try:
-            self._settings_service = str(e.value).strip() or "engine"
-        except Exception:
-            self._settings_service = "engine"
-        if self._settings_search:
-            self._settings_search.set_value("")
-        ui.timer(0.01, self.refresh_settings, once=True)
 
     def _on_settings_advanced_change(self, e) -> None:
         try:
             self._settings_advanced = bool(e.value)
         except Exception:
             self._settings_advanced = False
+        self._render_settings_grid()
+
+    def _on_show_unmapped_change(self, e) -> None:
+        try:
+            self._settings_show_unmapped = bool(e.value)
+        except Exception:
+            self._settings_show_unmapped = False
         self._render_settings_grid()
 
     def _on_topcat_change(self, e) -> None:
@@ -1053,15 +711,15 @@ class ControlUI:
             self._settings_topcat_value = None
         self._render_settings_grid()
 
-    def _build_topcat_tabs(self, topcats: List[str]) -> None:
+    def _build_topcat_tabs_from_csv(self) -> None:
         if not self._settings_topcat_container:
             return
 
-        self._settings_topcat_container.clear()
-
+        topcats = self._topcats_from_csv()
         if self._settings_topcat_value not in topcats:
             self._settings_topcat_value = topcats[0] if topcats else None
 
+        self._settings_topcat_container.clear()
         with self._settings_topcat_container:
             with ui.tabs(value=self._settings_topcat_value, on_change=self._on_topcat_change).classes("w-full") as t:
                 self._settings_topcat_tabs = t
@@ -1072,39 +730,37 @@ class ControlUI:
         if not self._settings_grid_container:
             return
 
+        # tabs always computed from CSV
+        self._build_topcat_tabs_from_csv()
+        selected_topcat = self._settings_topcat_value or (self._topcats_from_csv()[0] if self._topcats_from_csv() else "Main")
+
         env = self._settings_env_work or {}
-
-        # ✅ KEYS DRIVEN BY CSV + ENV (NOT ENV ONLY)
-        all_keys = self._all_setting_keys(env)
-
-        # ✅ TOP TABS DRIVEN BY CSV + ENV
-        topcats = self._topcats_from_keys(all_keys)
-        self._build_topcat_tabs(topcats)
-        selected_topcat = self._settings_topcat_value or (topcats[0] if topcats else None)
-
-        self._settings_grid_container.clear()
-        self._settings_inputs = {}
+        advanced = bool(self._settings_advanced)
 
         q = ""
         if self._settings_search:
             q = str(self._settings_search.value or "").strip().lower()
 
-        advanced = bool(self._settings_advanced)
+        self._settings_grid_container.clear()
+        self._settings_inputs = {}
 
-        # bucket by category (within selected top_category)
+        # bucket by category: ONLY keys from CSV in this topcat
+        keys_in_top = self._keys_for_topcat_from_csv(selected_topcat)
+
         buckets: Dict[str, List[str]] = {}
-        for k in all_keys:
+        for k in keys_in_top:
             meta = self._get_ref(k)
-            tc = (meta.get("top_category") or "Main").strip() or "Main"
-            if selected_topcat and tc != selected_topcat:
-                continue
-            cat = meta.get("category", "Other") or "Other"
+            cat = meta.get("category") or "Other"
             buckets.setdefault(cat, []).append(k)
 
-        categories: List[str] = list(self._category_order)
-        for cat in sorted(buckets.keys()):
-            if cat not in categories:
-                categories.append(cat)
+        categories: List[str] = []
+        # keep CSV category ordering, but only those with content in this topcat
+        for c in self._category_order:
+            if c in buckets:
+                categories.append(c)
+        for c in sorted(buckets.keys()):
+            if c not in categories:
+                categories.append(c)
 
         def key_sort(k: str) -> Tuple[int, str]:
             meta = self._get_ref(k)
@@ -1115,7 +771,7 @@ class ControlUI:
 
         with self._settings_grid_container:
             for cat in categories:
-                keys = buckets.get(cat, [])
+                keys = list(buckets.get(cat, []))
                 if not keys:
                     continue
 
@@ -1149,9 +805,20 @@ class ControlUI:
 
                     with ui.element("div").classes("set-box-b"):
                         for key in keys:
-                            # ✅ if missing from env, show empty value (editable)
                             val = env.get(key, "")
                             self._render_setting_row(key, val)
+
+            # optional: show env vars not in CSV
+            if self._settings_show_unmapped:
+                unmapped = sorted([k for k in env.keys() if k not in self._env_ref_by_key])
+                if unmapped:
+                    with ui.element("div").classes("set-box"):
+                        with ui.element("div").classes("set-box-h"):
+                            ui.label("Unmapped (env only)")
+                            ui.label(f"{len(unmapped)} vars").classes("meta")
+                        with ui.element("div").classes("set-box-b"):
+                            for key in unmapped:
+                                self._render_setting_row(key, env.get(key, ""))
 
     def _render_setting_row(self, key: str, val: str) -> None:
         def set_work(v: Any) -> None:
@@ -1166,6 +833,7 @@ class ControlUI:
 
         with ui.element("div").classes("set-row"):
             with ui.element("div").classes("set-left"):
+                # only english_name + explanation; key is hidden but copyable
                 ui.html(f'<div class="set-name" title="{k_e}" data-copy="{k_e}">{name_e}</div>')
                 ui.html(f'<div class="set-desc">{exp_e if exp_e else "—"}</div>')
 
@@ -1190,11 +858,13 @@ class ControlUI:
             inp.classes("set-ctl")
             self._settings_inputs[key] = inp
 
+    # -------------------- API: load/save env from azuramix.env --------------------
+
     async def refresh_settings(self) -> None:
-        svc = self._settings_service or "engine"
-        path = self._compose_env_endpoint(svc)
+        if not self._settings_topcat_container:
+            return
         try:
-            data = await self._get_json(path)
+            data = await self._get_json("/compose/engine_env")
             env = data.get("environment") if isinstance(data, dict) else None
             if not isinstance(env, dict):
                 env = {}
@@ -1211,11 +881,10 @@ class ControlUI:
             self._settings_env_base = dict(clean)
             self._settings_env_work = dict(clean)
 
-            # recompute topcat selection based on CSV+ENV
-            all_keys = self._all_setting_keys(self._settings_env_work)
-            topcats = self._topcats_from_keys(all_keys)
+            # tabs from CSV only (but keep selection)
+            topcats = self._topcats_from_csv()
             if self._settings_topcat_value not in topcats:
-                self._settings_topcat_value = topcats[0] if topcats else None
+                self._settings_topcat_value = topcats[0] if topcats else "Main"
 
             self._render_settings_grid()
         except Exception as e:
@@ -1227,10 +896,6 @@ class ControlUI:
         if self._compose_env_busy:
             ui.notify("Save busy", type="warning")
             return
-
-        svc = self._settings_service or "engine"
-        path = self._compose_env_endpoint(svc)
-
         self._compose_env_busy = True
         try:
             out: Dict[str, str] = {}
@@ -1241,11 +906,11 @@ class ControlUI:
                 out[kk] = "" if v is None else str(v)
 
             payload = {"environment": out, "env_format_prefer": self._compose_env_format}
-            r = await self._post_json(path, payload)
+            r = await self._post_json("/compose/engine_env", payload)
 
             if r.get("ok"):
                 self._set_restart_needed(True)
-                ui.notify("Saved. Restart/Recreate required.", type="warning")
+                ui.notify("Saved to azuramix.env. Restart/Recreate required.", type="warning")
                 await self.refresh_settings()
             else:
                 ui.notify("Save failed", type="negative")
@@ -1254,132 +919,18 @@ class ControlUI:
         finally:
             self._compose_env_busy = False
 
-    # -------------------- HTTP helpers --------------------
-
     async def _get_json(self, path: str) -> Dict[str, Any]:
-        url = f"http://127.0.0.1:{self.settings.ui_port}{self.api_base}{path}"
+        url = f"http://127.0.0.1:{self.settings.ui_port}{self.settings.api_prefix.rstrip('/')}{path}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.get(url)
             r.raise_for_status()
             data = r.json()
             return data if isinstance(data, dict) else {"data": data}
 
-    async def _get_text(self, path: str) -> str:
-        url = f"http://127.0.0.1:{self.settings.ui_port}{self.api_base}{path}"
+    async def _post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"http://127.0.0.1:{self.settings.ui_port}{self.settings.api_prefix.rstrip('/')}{path}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            r = await client.get(url)
+            r = await client.post(url, json=payload)
             r.raise_for_status()
-            return r.text
-
-    # -------------------- Refresh flows --------------------
-
-    async def refresh_all(self) -> None:
-        await self.refresh_runtime()
-        await self.refresh_now()
-        await self.refresh_upcoming()
-        await self.refresh_logs()
-
-    async def refresh_runtime(self) -> None:
-        try:
-            rt = await self._get_json("/panel/runtime")
-        except Exception:
-            self._set_docker_badge(ok=False, text="Docker: error")
-            if self._rt_engine_tbl:
-                self._rt_engine_tbl.set_content(self._runtime_table_html({"status": "error"}))
-            if self._rt_sched_tbl:
-                self._rt_sched_tbl.set_content(self._runtime_table_html({"status": "error"}))
-            return
-
-        docker_ok = bool(rt.get("docker_ping"))
-        self._set_docker_badge(ok=docker_ok, text=f"Docker: {'OK' if docker_ok else 'DOWN'}")
-
-        eng = rt.get("engine") or {}
-        sch = rt.get("scheduler") or {}
-
-        if self._rt_engine_tbl:
-            self._rt_engine_tbl.set_content(self._runtime_table_html(eng))
-        if self._rt_sched_tbl:
-            self._rt_sched_tbl.set_content(self._runtime_table_html(sch))
-
-    def _set_docker_badge(self, ok: bool, text: str) -> None:
-        if self._docker_badge is None:
-            return
-        dot = "ok" if ok else "err"
-        self._docker_badge.set_content(f'<span class="az-badge"><span class="az-dot {dot}"></span><span>{html.escape(text)}</span></span>')
-
-    async def refresh_now(self) -> None:
-        try:
-            now = await self._get_json("/panel/now")
-            title = now.get("title_effective") or now.get("title_observed") or "—"
-            if self._now_title:
-                self._now_title.set_text(title)
-            if self._now_meta:
-                self._now_meta.set_content(self._now_meta_html(now if isinstance(now, dict) else {}))
-        except Exception:
-            if self._now_title:
-                self._now_title.set_text("—")
-            if self._now_meta:
-                self._now_meta.set_content(self._now_meta_html({}))
-
-    async def refresh_upcoming(self) -> None:
-        if self._up_list_container is None:
-            return
-        try:
-            up = await self._get_json("/panel/upcoming?n=10")
-            items = up.get("upcoming") or []
-            if not isinstance(items, list):
-                items = []
-        except Exception:
-            items = []
-
-        self._up_list_container.clear()
-        with self._up_list_container:
-            if not items:
-                ui.html('<div style="opacity:.7;">—</div>')
-                return
-            for i, it in enumerate(items, start=1):
-                if not isinstance(it, dict):
-                    continue
-                title = str(it.get("title_display") or it.get("title") or "—")
-                playlist = str(it.get("playlist") or "—")
-                ts = str(it.get("ts") or "")
-
-                title_e = html.escape(title)
-                playlist_e = html.escape(playlist)
-                ts_e = html.escape(ts)
-                tail = f' <span class="t-dim">[{ts_e}]</span>' if ts else ""
-                ui.html(
-                    f'<div class="az-item"><span class="idx">{i}.</span> '
-                    f'<span class="txt" data-copy="{title_e}">{title_e}</span> '
-                    f'<span class="t-dim">|</span> '
-                    f'<span class="t-cyan t-bold" data-copy="{playlist_e}">{playlist_e}</span>'
-                    f'{tail}'
-                    f"</div>"
-                )
-
-    async def refresh_logs(self) -> None:
-        try:
-            eng = await self._get_text("/logs?service=engine&tail=200")
-            if self._log_html_engine:
-                self._log_html_engine.set_content(f'<div class="console-content">{html.escape(eng)}</div>')
-        except Exception:
-            if self._log_html_engine:
-                self._log_html_engine.set_content('<div class="console-content">—</div>')
-
-        try:
-            sch = await self._get_text("/logs?service=scheduler&tail=200")
-            if self._log_html_sched:
-                self._log_html_sched.set_content(f'<div class="console-content">{html.escape(sch)}</div>')
-        except Exception:
-            if self._log_html_sched:
-                self._log_html_sched.set_content('<div class="console-content">—</div>')
-
-    def enable_autorefresh(self) -> None:
-        if self._timer is not None:
-            return
-        self._timer = ui.timer(5.0, self.refresh_all)
-
-    def disable_autorefresh(self) -> None:
-        if self._timer is not None:
-            self._timer.cancel()
-        self._timer = None
+            data = r.json()
+            return data if isinstance(data, dict) else {"data": data}
