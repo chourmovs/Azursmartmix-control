@@ -1,11 +1,11 @@
 ﻿parameter,category,priority,english_name,explanation
 SCHED_ACCESS_LOG,Scheduler & Time,primary,Uvicorn access log enable,"When truthy, keeps per-request access logs (GET /health, /next1); when false, suppresses uvicorn.access noise in scheduler logs."
 SCHED_AZURACAST_REFRESH_S,Scheduler & Time,secondary,AzuraCast playlist refresh interval (seconds),Minimum interval between AzuraCast playlist/schedule refresh calls; higher values reduce API load but react slower to changes.
-SCHED_CONFIG,Scheduler & Time,primary,Scheduler config file path,"Filesystem path to the YAML config consumed by the scheduler service (e.g., media.root, AzuraCast API settings)."
+SCHED_CONFIG,Scheduler & Time,secondary,Scheduler config file path,"Filesystem path to the YAML config consumed by the scheduler service (e.g., media.root, AzuraCast API settings)."
 SCHED_HTTP_HOST,Scheduler & Time,primary,Scheduler HTTP bind address,IP/interface FastAPI/Uvicorn binds to inside the container (0.0.0.0 to listen on all interfaces).
 SCHED_HTTP_PORT,Scheduler & Time,primary,Scheduler HTTP bind port,TCP port FastAPI/Uvicorn binds to inside the container (engine calls this over Docker network).
-SCHED_MODE,Scheduler & Time,primary,Scheduler mode selector,"Selects the scheduler strategy (e.g., 'azuracast_schedule' for AzuraCast schedule API + playlists exports, otherwise basic filesystem rotation)."
-TZ,Scheduler & Time,primary,Timezone (IANA),"Timezone used for schedule evaluation and human-friendly timestamps (e.g., Europe/Paris). Does not affect audio, only schedule timing and log timestamps."
+SCHED_MODE,Scheduler & Time,secondary,Scheduler mode selector,"Selects the scheduler strategy (e.g., 'azuracast_schedule' for AzuraCast schedule API + playlists exports, otherwise basic filesystem rotation)."
+TZ,Scheduler & Time,secondary,Timezone (IANA),"Timezone used for schedule evaluation and human-friendly timestamps (e.g., Europe/Paris). Does not affect audio, only schedule timing and log timestamps."
 PREFETCH_TARGET,Prefetch,secondary,Prefetch queue target depth (tracks),"Target number of upcoming URIs buffered in the engine queue; higher improves resiliency, but increases RAM/disk churn (especially with preprocessing)."
 SCHED_RETRY_S,Prefetch,secondary,Scheduler retry backoff (seconds),Sleep duration before retrying after a failed/empty scheduler response; impacts responsiveness under scheduler/API issues.
 SCHED_TIMEOUT,Prefetch,secondary,Scheduler HTTP timeout (seconds),"Timeout for HTTP calls to the scheduler; too low can cause transient 'no next track', too high can stall prefetch on scheduler hiccups."
@@ -16,7 +16,7 @@ PLAYBIN_QOUT_MIN_MS,Playback Engine,secondary,Output queue minimum threshold (ms
 PLAYBIN_SINGLE_SEGMENT,Playback Engine,secondary,Force single-segment timestamps,Enables identity(single-segment=true) to normalize segments/timestamps across URI switches; mitigates micro-slips at track boundaries. 
 PLAYBIN_GST_BUS_LOG,Observability,primary,GStreamer bus message logging,"Log key GStreamer bus messages (STATE_CHANGED, STREAM_START, LATENCY, ASYNC_DONE, EOS, ERROR). (Alias: GST_BUS_LOG)."
 PLAYBIN_QSTATS_LOG,Observability,primary,Output queue stats logging,Log q_out current-level-time/buffers/bytes to diagnose buffering/underruns. (Alias: QSTATS_LOG).
-PLAYBIN_TIMING_LOG,Observability,primary,Playbin timing instrumentation,"Enable high-resolution timing logs around about-to-finish, set_uri, EOS, and queue levels. (Alias: TIMING_LOG / TIMING_ENABLE)."
+PLAYBIN_TIMING_LOG,Observability,secondary,Playbin timing instrumentation,"Enable high-resolution timing logs around about-to-finish, set_uri, EOS, and queue levels. (Alias: TIMING_LOG / TIMING_ENABLE)."
 BRIDGE_CUT_MAX_CAND,Bridge & Packchain,secondary,Smart-cut max candidates,"Maximum number of candidate timestamps evaluated during smart-cut search; more candidates = better pick, more CPU."
 BRIDGE_CUT_SCAN_S,Bridge & Packchain,secondary,Smart-cut scan window (seconds),"If >0, preprocess searches around the ideal fadeout start to find a lower-energy window (RMS) to start the fade, reducing 'fade on a transient'."
 BRIDGE_CUT_WIN_MS,Bridge & Packchain,secondary,Smart-cut analysis window (ms),"Window size for RMS measurement during smart-cut search; larger smooths measurement, smaller reacts to transients."
@@ -50,13 +50,13 @@ PREPROCESS_SAMPLE_RATE,Preprocess & Resources,secondary,Preprocess sample rate (
 PREPROCESS_TTL_H,Preprocess & Resources,secondary,Preprocess cache TTL (hours),"Time-to-live for cached artifacts; higher reduces recomputation, but keeps disk usage longer."
 PREPROCESS_WAIT_S,Preprocess & Resources,secondary,Safe cache wait timeout (seconds),"How long prefetch waits for safe_* to become available; too short yields more fallbacks, too long can block prefetch under heavy load."
 PREPROCESS_WORKERS,Preprocess & Resources,secondary,Preprocess worker count,"Concurrency for preprocessing; more workers = faster warm cache, but more CPU/IO contention."
-PREPROCESS_SILENCE_D,Silence Detection,secondary,Minimum silence duration (seconds),Minimum continuous duration below threshold to qualify as silence; avoids trimming brief low-level passages. ╬╡├¬├çcite╬╡├¬├⌐turn0search19╬╡├¬├╝
-PREPROCESS_SILENCE_ENABLE,Silence Detection,primary,Enable intro silence trimming,"Uses FFmpeg silencedetect-style analysis to detect leading silence and trims it, improving perceived pacing and reducing dead air. ╬╡├¬├çcite╬╡├¬├⌐turn0search19╬╡├¬├╝"
-PREPROCESS_SILENCE_NOISE_DB,Silence Detection,secondary,Silence threshold (dB),"Noise floor threshold for silence detection (e.g., -20dB): higher (closer to 0) trims more aggressively, risk cutting quiet intros. ╬╡├¬├çcite╬╡├¬├⌐turn0search19╬╡├¬├╝"
+PREPROCESS_SILENCE_D,Silence Detection,secondary,Minimum silence duration (seconds),Minimum continuous duration below threshold to qualify as silence; avoids trimming brief low-level passages.
+PREPROCESS_SILENCE_ENABLE,Silence Detection,primary,Enable intro silence trimming,"Uses FFmpeg silencedetect-style analysis to detect leading silence and trims it, improving perceived pacing and reducing dead air."
+PREPROCESS_SILENCE_NOISE_DB,Silence Detection,secondary,Silence threshold (dB),"Noise floor threshold for silence detection (e.g., -20dB): higher (closer to 0) trims more aggressively, risk cutting quiet intros."
 PREPROCESS_SILENCE_SCAN_MAX_S,Silence Detection,secondary,Max scan duration for silence detect (seconds),Only scans the first N seconds for intro silence; keeps preprocessing bounded for long tracks.
 POST_GAIN_DB,Loudness & EQ,secondary,Post output gain (dB),Static gain applied at the final GStreamer volume element before encoding/streaming; adjusts loudness globally without changing dynamics.
 PREPROCESS_HPF_ENABLE,Loudness & EQ,primary,Enable high-pass filter,"When true, applies an HPF to remove subsonic rumble/low-frequency DC-like content; can improve headroom and limiter behavior."
-PREPROCESS_HPF_FREQ,Loudness & EQ,secondary,High-pass cutoff frequency (Hz),"Cutoff frequency for HPF; very low values (5╬ô├ç├┤30Hz) remove rumble without thinning bass, higher values reduce bass weight."
+PREPROCESS_HPF_FREQ,Loudness & EQ,secondary,High-pass cutoff frequency (Hz),"Cutoff frequency for HPF; very low values (5-30Hz) remove rumble without thinning bass, higher values reduce bass weight."
 PREPROCESS_LUFS_GAIN_ENABLE,Loudness & EQ,primary,Enable LUFS-based static gain,"When enabled, preprocess measures integrated loudness and applies a static gain delta (clamped) to align tracks toward a target LUFS without loudnorm re-shaping."
 PREPROCESS_LUFS_GAIN_MAX_DB,Loudness & EQ,secondary,Maximum LUFS gain (dB),Upper clamp for gain correction; prevents boosting very quiet tracks into noise/distortion territory.
 PREPROCESS_LUFS_GAIN_MIN_DB,Loudness & EQ,secondary,Minimum LUFS gain (dB),Lower clamp for applied gain correction; prevents over-attenuating very loud masters.
@@ -78,24 +78,18 @@ ICECAST_DESCRIPTION,Output (Icecast & Encoding),primary,Stream description,Metad
 ICECAST_GENRE,Output (Icecast & Encoding),primary,Stream genre,Metadata: genre tag sent to Icecast (status page / directory).
 ICECAST_HOST,Output (Icecast & Encoding),primary,Icecast server hostname,Host/IP of the Icecast server shout2send connects to. 
 ICECAST_MOUNT,Output (Icecast & Encoding),primary,Icecast mountpoint,"Mount path on Icecast (e.g., /gst-test.mp3) where the stream is published. "
-ICECAST_NAME,Output (Icecast & Encoding),primary,Stream display name,Metadata: stream name sent to Icecast (shown in status page / players).
-ICECAST_PASSWORD,Output (Icecast & Encoding),primary,Icecast source password,Icecast source password used by shout2send to authenticate (matches icecast.xml). 
-ICECAST_PORT,Output (Icecast & Encoding),primary,Icecast server port,TCP port of the Icecast server (often 8000). 
+ICECAST_NAME,Output (Icecast & Encoding),secondary,Stream display name,Metadata: stream name sent to Icecast (shown in status page / players).
+ICECAST_PASSWORD,Output (Icecast & Encoding),secondary,Icecast source password,Icecast source password used by shout2send to authenticate (matches icecast.xml). 
+ICECAST_PORT,Output (Icecast & Encoding),secondary,Icecast server port,TCP port of the Icecast server (often 8000). 
 ICECAST_PROTOCOL,Output (Icecast & Encoding),secondary,Icecast protocol version,shout2send protocol selector (commonly 3 for Icecast2). Mostly a transport/handshake detail.
 ICECAST_PUBLIC,Output (Icecast & Encoding),primary,Icecast 'public' flag,Advertises the stream as public (directory listing) depending on Icecast setup.
 ICECAST_SEND_TITLE_INFO,Output (Icecast & Encoding),primary,Send per-track title metadata,"When true, engine attempts to push current track title/artist updates to Icecast metadata (can add chatter; keep off if you inject metadata elsewhere)."
-ICECAST_USERNAME,Output (Icecast & Encoding),primary,Icecast source username,Icecast source username used by shout2send (often 'source'). 
+ICECAST_USERNAME,Output (Icecast & Encoding),secondary,Icecast source username,Icecast source username used by shout2send (often 'source'). 
 MP3_BITRATE_KBPS,Output (Icecast & Encoding),secondary,MP3 bitrate (kbps),"lamemp3enc target bitrate; higher increases quality/bandwidth, lower reduces bandwidth but may introduce artifacts."
 MP3_CBR,Output (Icecast & Encoding),primary,MP3 constant bitrate enable,"When true, forces CBR mode in MP3 encoder; improves predictability for some clients at the cost of efficiency on complex audio."
 SAMPLE_RATE,Output (Icecast & Encoding),secondary,Output sample rate (Hz),"Target PCM sample rate for the GStreamer pipeline and encoding stage (e.g., 44100). Affects resampling cost and potential HF roll-off if downsampled."
-GST_BUS_LOG,Other,primary,GStreamer bus log enable (alias),Alias for PLAYBIN_GST_BUS_LOG (without PLAYBIN_ prefix).
-QOUT_MAX_MS,Other,secondary,Queue max buffer time (ms) (alias),Alias for PLAYBIN_QOUT_MAX_MS (without PLAYBIN_ prefix).
-QOUT_MIN_MS,Other,secondary,Queue min threshold (ms) (alias),Alias for PLAYBIN_QOUT_MIN_MS (without PLAYBIN_ prefix).
-QSTATS_LOG,Other,primary,Queue stats log enable (alias),Alias for PLAYBIN_QSTATS_LOG (without PLAYBIN_ prefix).
-SINGLE_SEGMENT,Other,secondary,Single-segment enable (alias),Alias for PLAYBIN_SINGLE_SEGMENT (without PLAYBIN_ prefix).
 SWITCH_GUARD_HOLD_S,Other,secondary,Switch guard hold time (seconds),Minimum hold time during which additional set_uri calls are ignored (reentrancy guard); reduces accidental double-switch in fast callbacks.
-TIMING_ENABLE,Other,primary,Timing log enable (alias),Alias for PLAYBIN_TIMING_LOG (alternative name; kept for backward compatibility).
-TIMING_LOG,Other,primary,Timing log enable (alias),Alias for PLAYBIN_TIMING_LOG (accepted by playbin engine without the PLAYBIN_ prefix).
+,,,,
 ,,,,
 ,,,,
 ,,,,
