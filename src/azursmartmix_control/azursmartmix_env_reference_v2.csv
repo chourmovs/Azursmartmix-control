@@ -88,7 +88,8 @@ ICECAST_USERNAME,Output (Icecast & Encoding),secondary,Icecast source username,I
 MP3_BITRATE_KBPS,Output (Icecast & Encoding),secondary,MP3 bitrate (kbps),"lamemp3enc target bitrate; higher increases quality/bandwidth, lower reduces bandwidth but may introduce artifacts."
 MP3_CBR,Output (Icecast & Encoding),primary,MP3 constant bitrate enable,"When true, forces CBR mode in MP3 encoder; improves predictability for some clients at the cost of efficiency on complex audio."
 SAMPLE_RATE,Output (Icecast & Encoding),secondary,Output sample rate (Hz),"Target PCM sample rate for the GStreamer pipeline and encoding stage (e.g., 44100). Affects resampling cost and potential HF roll-off if downsampled."
-SWITCH_GUARD_HOLD_S,Other,secondary,Switch guard hold time (seconds),Minimum hold time during which additional set_uri calls are ignored (reentrancy guard); reduces accidental double-switch in fast callbacks.
+SWITCH_GUARD_HOLD_S,Playback Engine,secondary,Switch guard hold time (seconds),Minimum hold time during which additional set_uri calls are ignored (reentrancy guard); reduces accidental double-switch in fast callbacks.
+,,,,
 ,,,,
 ,,,,
 ,,,,
