@@ -1,68 +1,101 @@
-﻿parameter,top category,category,priority,english_name,explanation
-SCHED_ACCESS_LOG,engine,Scheduler & Time,primary,Uvicorn access log enable,"When truthy, keeps per-request access logs (GET /health, /next1); when false, suppresses uvicorn.access noise in scheduler logs."
-SCHED_AZURACAST_REFRESH_S,engine,Scheduler & Time,secondary,AzuraCast playlist refresh interval (seconds),Minimum interval between AzuraCast playlist/schedule refresh calls; higher values reduce API load but react slower to changes.
-SCHED_CONFIG,engine,Scheduler & Time,secondary,Scheduler config file path,"Filesystem path to the YAML config consumed by the scheduler service (e.g., media.root, AzuraCast API settings)."
-SCHED_HTTP_HOST,engine,Scheduler & Time,primary,Scheduler HTTP bind address,IP/interface FastAPI/Uvicorn binds to inside the container (0.0.0.0 to listen on all interfaces).
-SCHED_HTTP_PORT,engine,Scheduler & Time,primary,Scheduler HTTP bind port,TCP port FastAPI/Uvicorn binds to inside the container (engine calls this over Docker network).
-SCHED_MODE,engine,Scheduler & Time,secondary,Scheduler mode selector,"Selects the scheduler strategy (e.g., 'azuracast_schedule' for AzuraCast schedule API + playlists exports, otherwise basic filesystem rotation)."
-TZ,engine,Scheduler & Time,secondary,Timezone (IANA),"Timezone used for schedule evaluation and human-friendly timestamps (e.g., Europe/Paris). Does not affect audio, only schedule timing and log timestamps."
-PREFETCH_TARGET,engine,Prefetch,secondary,Prefetch queue target depth (tracks),"Target number of upcoming URIs buffered in the engine queue; higher improves resiliency, but increases RAM/disk churn (especially with preprocessing)."
-SCHED_RETRY_S,engine,Prefetch,secondary,Scheduler retry backoff (seconds),Sleep duration before retrying after a failed/empty scheduler response; impacts responsiveness under scheduler/API issues.
-SCHED_TIMEOUT,engine,Prefetch,secondary,Scheduler HTTP timeout (seconds),"Timeout for HTTP calls to the scheduler; too low can cause transient 'no next track', too high can stall prefetch on scheduler hiccups."
-SCHED_URL,engine,Prefetch,primary,Scheduler next-track endpoint URL,HTTP URL polled by the engine prefetcher to obtain the next track path (your contract is typically /next1).
+parameter,top category,category,priority,english_name,explanation
+SCHED_HTTP_PORT,engine,Scheduler,primary,Scheduler HTTP bind port,TCP port FastAPI/Uvicorn binds to inside the container (engine calls this over Docker network).
+SCHED_MODE,engine,Scheduler,primary,Scheduler mode selector,"Selects the scheduler strategy (e.g., 'azuracast_schedule' for AzuraCast schedule API + playlists exports, otherwise basic filesystem rotation)."
+SCHED_PREPROCESS_DISABLE_PLAYLISTS,engine,Scheduler,primary,Disable trim on certain playlists,"select playlist for witch you don't want to trim every ""maximum cap s"", like mixes or podcast"
+SCHED_URL,engine,Scheduler,primary,Scheduler next-track endpoint URL,HTTP URL polled by the engine prefetcher to obtain the next track path (your contract is typically /next1).
+SCHED_ACCESS_LOG,engine,Scheduler,secondary,Uvicorn access log enable,"When truthy, keeps per-request access logs (GET /health, /next1); when false, suppresses uvicorn.access noise in scheduler logs."
+SCHED_AZURACAST_REFRESH_S,engine,Scheduler,secondary,AzuraCast playlist refresh interval (seconds),Minimum interval between AzuraCast playlist/schedule refresh calls; higher values reduce API load but react slower to changes.
+SCHED_CONFIG,engine,Scheduler,secondary,Scheduler config file path,"Filesystem path to the YAML config consumed by the scheduler service (e.g., media.root, AzuraCast API settings)."
+SCHED_HTTP_HOST,engine,Scheduler,secondary,Scheduler HTTP bind address,IP/interface FastAPI/Uvicorn binds to inside the container (0.0.0.0 to listen on all interfaces).
+SCHED_RETRY_S,engine,Scheduler,secondary,Scheduler retry backoff (seconds),Sleep duration before retrying after a failed/empty scheduler response; impacts responsiveness under scheduler/API issues.
+SCHED_TIMEOUT,engine,Scheduler,secondary,Scheduler HTTP timeout (seconds),"Timeout for HTTP calls to the scheduler; too low can cause transient 'no next track', too high can stall prefetch on scheduler hiccups."
+TZ,engine,Scheduler,secondary,Timezone (IANA),"Timezone used for schedule evaluation and human-friendly timestamps (e.g., Europe/Paris). Does not affect audio, only schedule timing and log timestamps."
+PREFETCH_TARGET,engine,Prefetch & Selection,primary,Prefetch queue target depth (tracks),"Target number of upcoming URIs buffered in the engine queue; higher improves resiliency, but increases RAM/disk churn (especially with preprocessing)."
+TEMPO_LIMIT_ENABLE,engine,Prefetch & Selection,primary,Enable tempo-based selection gate,"When true, prefetch will ACCEPT/REJECT scheduler candidates based on BPM delta between consecutive tracks (consumes BPM from DB)."
+TEMPO_REQUIRE_BPM,engine,Prefetch & Selection,primary,Require BPM (strict mode),"If true, missing BPM in DB (MISS) causes candidate rejection. Requires shared DB and sufficiently warm analysis; otherwise may lead to silence fallback."
+TEMPO_DB_CACHE_CAP,engine,Prefetch & Selection,secondary,Tempo DB lookup cache capacity,Max number of cached track lookups held in memory; prevents unbounded growth.
+TEMPO_DB_CACHE_TTL_S,engine,Prefetch & Selection,secondary,Tempo DB lookup cache TTL (seconds),TTL for in-memory lookup cache in prefetch to reduce SQLite read load.
+TEMPO_DB_DEBUG,engine,Prefetch & Selection,secondary,Tempo DB debug logging,"When truthy, logs DB lookup failures (MISS / root-mismatch) to help diagnose path/root issues."
+TEMPO_DB_ENABLE,engine,Prefetch & Selection,secondary,Enable tempo DB consumer,"When truthy, prefetch consumes BPM from the features SQLite DB (radio-grade). No realtime BPM computation should be used for decisioning."
+TEMPO_DB_LOG_MISS_THROTTLE_S,engine,Prefetch & Selection,secondary,Tempo DB MISS log throttle (seconds),Rate-limits repetitive DB MISS/root-mismatch logs to avoid log spam when DB is cold or misconfigured.
+TEMPO_DB_MEDIA_ROOT,engine,Prefetch & Selection,secondary,Media root for tempo DB keying,Absolute media root used to compute rel_path and track_id (track_id=sha1(rel_path)[:16]). Must match daemon's media.root and the scheduler path prefix.
+TEMPO_DB_PATH,engine,Prefetch & Selection,secondary,Tempo DB path,SQLite DB path to read BPM/is_fx from (usually /tmp/azurmix_cache/features.db). Must be on shared cache volume.
+TEMPO_DEBUG,engine,Prefetch & Selection,secondary,Tempo selection debug logging,"When truthy, logs per-candidate selection decisions (tempo(select), meta: track_id/rel/is_fx, reasons, delta%). Essential for actionable tuning."
+TEMPO_MAX_DELTA_PCT,engine,Prefetch & Selection,secondary,Max BPM delta (%),"Maximum allowed relative BPM delta between consecutive tracks. If exceeded, candidate is rejected and a new /next1 candidate is fetched (up to TEMPO_MAX_RETRY)."
+TEMPO_MAX_RETRY,engine,Prefetch & Selection,secondary,Max tempo selection retries,Max number of scheduler candidates tried before fail-open (accept last) to avoid dead-air.
+PLAYBIN_SINGLE_SEGMENT,engine,Playback Engine,primary,Force single-segment timestamps,Enables identity(single-segment=true) to normalize segments/timestamps across URI switches; mitigates micro-slips at track boundaries. 
+SWITCH_GUARD_HOLD_S,engine,Playback Engine,primary,Switch guard hold time (seconds),Minimum hold time during which additional set_uri calls are ignored (reentrancy guard); reduces accidental double-switch in fast callbacks.
 EOS_COOLDOWN_S,engine,Playback Engine,secondary,EOS cooldown (seconds),Rate-limits EOS-triggered emergency swaps to avoid rapid looping if a stream reaches EOS repeatedly (stability guard).
 PLAYBIN_QOUT_MAX_MS,engine,Playback Engine,secondary,Output queue max buffer time (ms),Sets queue.max-size-time in the audio sink bin: caps buffered audio time to control latency vs underrun protection. 
 PLAYBIN_QOUT_MIN_MS,engine,Playback Engine,secondary,Output queue minimum threshold (ms),Sets queue.min-threshold-time: pipeline waits for at least this buffered duration before pushing downstream; reduces glitches but increases startup/transition latency. 
-PLAYBIN_SINGLE_SEGMENT,engine,Playback Engine,secondary,Force single-segment timestamps,Enables identity(single-segment=true) to normalize segments/timestamps across URI switches; mitigates micro-slips at track boundaries. 
+ICECAST_HOST,engine,Output (Icecast & Encoding),primary,Icecast server hostname,Host/IP of the Icecast server shout2send connects to. 
+ICECAST_MOUNT,engine,Output (Icecast & Encoding),primary,Icecast mountpoint,"Mount path on Icecast (e.g., /gst-test.mp3) where the stream is published. "
+ICECAST_PUBLIC,engine,Output (Icecast & Encoding),primary,Icecast 'public' flag,Advertises the stream as public (directory listing) depending on Icecast setup.
+MP3_CBR,engine,Output (Icecast & Encoding),primary,MP3 constant bitrate enable,"When true, forces CBR mode in MP3 encoder; improves predictability for some clients at the cost of efficiency on complex audio."
+CHANNELS,engine,Output (Icecast & Encoding),secondary,Output channel count,"Number of output channels (1=mono, 2=stereo) for the stream; affects spatial image and bandwidth."
+ICECAST_DESCRIPTION,engine,Output (Icecast & Encoding),secondary,Stream description,Metadata: longer description sent to Icecast (shown in status page / players).
+ICECAST_GENRE,engine,Output (Icecast & Encoding),secondary,Stream genre,Metadata: genre tag sent to Icecast (status page / directory).
+ICECAST_NAME,engine,Output (Icecast & Encoding),secondary,Stream display name,Metadata: stream name sent to Icecast (shown in status page / players).
+ICECAST_PASSWORD,engine,Output (Icecast & Encoding),secondary,Icecast source password,Icecast source password used by shout2send to authenticate (matches icecast.xml). 
+ICECAST_PORT,engine,Output (Icecast & Encoding),secondary,Icecast server port,TCP port of the Icecast server (often 8000). 
+ICECAST_PROTOCOL,engine,Output (Icecast & Encoding),secondary,Icecast protocol version,shout2send protocol selector (commonly 3 for Icecast2). Mostly a transport/handshake detail.
+ICECAST_SEND_TITLE_INFO,engine,Output (Icecast & Encoding),secondary,Send per-track title metadata,"When true, engine attempts to push current track title/artist updates to Icecast metadata (can add chatter; keep off if you inject metadata elsewhere)."
+ICECAST_USERNAME,engine,Output (Icecast & Encoding),secondary,Icecast source username,Icecast source username used by shout2send (often 'source'). 
+MP3_BITRATE_KBPS,engine,Output (Icecast & Encoding),secondary,MP3 bitrate (kbps),"lamemp3enc target bitrate; higher increases quality/bandwidth, lower reduces bandwidth but may introduce artifacts."
+SAMPLE_RATE,engine,Output (Icecast & Encoding),secondary,Output sample rate (Hz),"Target PCM sample rate for the GStreamer pipeline and encoding stage (e.g., 44100). Affects resampling cost and potential HF roll-off if downsampled."
 PLAYBIN_GST_BUS_LOG,engine,Observability,primary,GStreamer bus message logging,"Log key GStreamer bus messages (STATE_CHANGED, STREAM_START, LATENCY, ASYNC_DONE, EOS, ERROR). (Alias: GST_BUS_LOG)."
 PLAYBIN_QSTATS_LOG,engine,Observability,primary,Output queue stats logging,Log q_out current-level-time/buffers/bytes to diagnose buffering/underruns. (Alias: QSTATS_LOG).
 PLAYBIN_TIMING_LOG,engine,Observability,secondary,Playbin timing instrumentation,"Enable high-resolution timing logs around about-to-finish, set_uri, EOS, and queue levels. (Alias: TIMING_LOG / TIMING_ENABLE)."
+AZURMIX_CACHE_DIR,engine,Resources & Cache,primary,Shared cache directory (engine + daemon),Shared RW cache directory for safe_* / pack_* artifacts and features DB. Must be writable by container user (uid=10001) and shared between Engine and Audio Daemon (bind-mount or named volume).
+PREPROCESS_CACHE_DIR,engine,Resources & Cache,secondary,Preprocess cache directory,Directory where safe_* and pack_* files are stored (default /tmp/azurmix_cache). Should be fast local storage.
+PREPROCESS_CACHE_MAX_MB,engine,Resources & Cache,secondary,Preprocess cache size cap (MB),Soft cap for cache eviction; limits disk usage by pruning old cached files when exceeding this size.
+PREPROCESS_CPU_LIMIT_PCT,engine,Resources & Cache,secondary,FFmpeg CPU limit per job (%),"If cpulimit is available, caps CPU usage of each ffmpeg process to this percentage; reduces contention on small hosts."
+PREPROCESS_NICE,engine,Resources & Cache,secondary,FFmpeg process nice level,Adjusts CPU scheduling priority (higher nice = lower priority) for ffmpeg jobs to protect realtime playback.
+PREPROCESS_TTL_H,engine,Resources & Cache,secondary,Preprocess cache TTL (hours),"Time-to-live for cached artifacts; higher reduces recomputation, but keeps disk usage longer."
+PREPROCESS_AHEAD,engine,Misc,secondary,Preprocess lookahead (tracks),Number of upcoming scheduler items to preprocess ahead of playback; increases resilience but raises CPU/disk activity.
+PREPROCESS_CHANNELS,engine,Misc,secondary,Preprocess channel count,Channels used for cached safe files (1 or 2); should match engine CHANNELS for consistency.
+PREPROCESS_POST_ENABLE,engine,Misc,secondary,Enable post-processing DSP chain,"Enables loudness gain, HPF, compressor, limiter stages after trimming/transcoding; affects final loudness and dynamics."
+PREPROCESS_SAMPLE_RATE,engine,Misc,secondary,Preprocess sample rate (Hz),Sample rate used for cached safe files; should match engine SAMPLE_RATE to avoid extra resampling.
+PREPROCESS_TEMPO_DEBUG,engine,Misc,secondary,Realtime BPM debug (DEPRECATED),Deprecated debug flag for realtime BPM probe. Prefer TEMPO_DEBUG + TEMPO_DB_DEBUG.
+PREPROCESS_TEMPO_ENABLE,engine,Misc,secondary,Realtime BPM probe (DEPRECATED),Deprecated by radio-grade pivot. Do not use realtime BPM computation for decisioning; prefer offline daemon + TEMPO_DB_* consumer.
+PREPROCESS_WAIT_S,engine,Misc,secondary,Safe cache wait timeout (seconds),"How long prefetch waits for safe_* to become available; too short yields more fallbacks, too long can block prefetch under heavy load."
+PREPROCESS_WORKERS,engine,Misc,secondary,Preprocess worker count,"Concurrency for preprocessing; more workers = faster warm cache, but more CPU/IO contention."
+PREPROCESS_ENABLE,audio,Preprocessing (Safe Files),primary,Enable FFmpeg preprocessing,"Master switch: when true, tracks are transcoded into 'safe' cached files before playback; enables silence trim, duration cap, and post DSP."
+PREPROCESS_FADEIN_S,audio,Preprocessing (Safe Files),primary,Fade-in duration (seconds),Applies a fade-in at the start of safe files; reduces clicks and helps start playback cleanly.
+PREPROCESS_FADEOUT_S,audio,Preprocessing (Safe Files),primary,Fade-out duration (seconds),Applies a fade-out near the end (and in bridge tails) to create smooth exits and enable bridge mixing.
+PREPROCESS_FORMAT,audio,Preprocessing (Safe Files),primary,Preprocess output format,Format for cached files ('wav' or 'mp3'); wav avoids lossy re-encode during trimming/packs but costs more disk.
+PREPROCESS_MAX_S,audio,Preprocessing (Safe Files),primary,Maximum safe duration (seconds),Hard cap for produced safe files; trims/limits long tracks to this duration to guarantee predictable transitions and pack alignment.
+PREPROCESS_ENFORCE_SAFE,audio,Preprocessing (Safe Files),secondary,Require safe cache before playback,"When true, engine/prefetch waits for safe_* output; if safe isn't ready, it may return empty (or fall back to silence) instead of using the unprocessed original."
+PREPROCESS_FADE_EVAL,audio,Preprocessing (Safe Files),secondary,FFmpeg fade evaluation mode,"Controls how FFmpeg evaluates fade curves (e.g., 'sample' for sample-accurate fades); impacts smoothness/precision of fades."
+PREPROCESS_FADEOUT_P,audio,Preprocessing (Safe Files),secondary,Fade-out curve selector,"Maps a numeric 'power' to a curve family (qsin/hsin/esin) used for fade-out; higher values bias toward smoother, less linear fades."
+PREPROCESS_FFMPEG_THREADS,audio,Preprocessing (Safe Files),secondary,FFmpeg threads per job,Sets ffmpeg -threads for each preprocessing job; lowering reduces CPU spikes and makes timing more deterministic.
+PREPROCESS_IONICE_CLASS,audio,Preprocessing (Safe Files),secondary,FFmpeg IO scheduling class,"Sets ionice class for ffmpeg disk IO (e.g., 2=best-effort) when ionice is available; helps avoid IO starvation."
+PREPROCESS_IONICE_LEVEL,audio,Preprocessing (Safe Files),secondary,FFmpeg IO scheduling level,"Sets ionice level within class (0-7); higher is lower priority, reducing impact on other processes."
+PREPROCESS_MP3_BITRATE_KBPS,audio,Preprocessing (Safe Files),secondary,Preprocess MP3 bitrate (kbps),"If PREPROCESS_FORMAT=mp3, bitrate used for cached files; wav is recommended for lossless trimming/packs."
+PREPROCESS_MP3_CBR,audio,Preprocessing (Safe Files),secondary,Preprocess MP3 CBR enable,"If PREPROCESS_FORMAT=mp3, toggles constant bitrate mode for cached outputs."
+PREPROCESS_SILENCE_ENABLE,audio,Silence Detection,primary,Enable intro silence trimming,"Uses FFmpeg silencedetect-style analysis to detect leading silence and trims it, improving perceived pacing and reducing dead air."
+PREPROCESS_SILENCE_D,audio,Silence Detection,secondary,Minimum silence duration (seconds),Minimum continuous duration below threshold to qualify as silence; avoids trimming brief low-level passages.
+PREPROCESS_SILENCE_NOISE_DB,audio,Silence Detection,secondary,Silence threshold (dB),"Noise floor threshold for silence detection (e.g., -20dB): higher (closer to 0) trims more aggressively, risk cutting quiet intros."
+PREPROCESS_SILENCE_SCAN_MAX_S,audio,Silence Detection,secondary,Max scan duration for silence detect (seconds),Only scans the first N seconds for intro silence; keeps preprocessing bounded for long tracks.
+BRIDGE_ENABLE,audio,Bridge & Packchain,primary,Enable bridge-plan packchain,"Enables the bridge-plan workflow (preprocess builds transition packs); when off, engine simply plays scheduler files back-to-back."
+BRIDGE_PACK_ENABLE,audio,Bridge & Packchain,primary,Enable pack building (packchain gate),"If supported by your PrefetcherPackChain implementation, toggles building of bridge packs; when false, it can degrade to plain safe files (no mixing)."
+BRIDGE_S,audio,Bridge & Packchain,primary,Bridge overlap duration (seconds),"Target duration of the transition segment where A fades out while B fades in; longer = smoother/less abrupt, but more 'mix' between tracks."
 BRIDGE_CUT_MAX_CAND,audio,Bridge & Packchain,secondary,Smart-cut max candidates,"Maximum number of candidate timestamps evaluated during smart-cut search; more candidates = better pick, more CPU."
 BRIDGE_CUT_SCAN_S,audio,Bridge & Packchain,secondary,Smart-cut scan window (seconds),"If >0, preprocess searches around the ideal fadeout start to find a lower-energy window (RMS) to start the fade, reducing 'fade on a transient'."
 BRIDGE_CUT_WIN_MS,audio,Bridge & Packchain,secondary,Smart-cut analysis window (ms),"Window size for RMS measurement during smart-cut search; larger smooths measurement, smaller reacts to transients."
 BRIDGE_EDGE_FADE_MS,audio,Bridge & Packchain,secondary,Pack edge fade (milliseconds),Adds tiny fade-in at the start of extracted tails/segments to suppress clicks at hard cuts; kept small (<=20ms).
 BRIDGE_EDGE_FADE_SHAPE,audio,Bridge & Packchain,secondary,Pack edge fade curve,"Curve used for micro edge fades (e.g., qsin/hsin/esin/lin); affects click suppression without audible pumping."
-BRIDGE_ENABLE,audio,Bridge & Packchain,primary,Enable bridge-plan packchain,"Enables the bridge-plan workflow (preprocess builds transition packs); when off, engine simply plays scheduler files back-to-back."
-BRIDGE_PACK_ENABLE,audio,Bridge & Packchain,primary,Enable pack building (packchain gate),"If supported by your PrefetcherPackChain implementation, toggles building of bridge packs; when false, it can degrade to plain safe files (no mixing)."
 BRIDGE_PACK_MERGE,audio,Bridge & Packchain,secondary,Merge pack segments into one file,"When true, preprocess merges A_head + bridge + B_mid into a single pack file to minimize playbin URI switches and reduce boundary artifacts."
-BRIDGE_S,audio,Bridge & Packchain,secondary,Bridge overlap duration (seconds),"Target duration of the transition segment where A fades out while B fades in; longer = smoother/less abrupt, but more 'mix' between tracks."
-PREPROCESS_AHEAD,engine,Preprocess & Resources,secondary,Preprocess lookahead (tracks),Number of upcoming scheduler items to preprocess ahead of playback; increases resilience but raises CPU/disk activity.
-PREPROCESS_CACHE_DIR,engine,Preprocess & Resources,secondary,Preprocess cache directory,Directory where safe_* and pack_* files are stored (default /tmp/azurmix_cache). Should be fast local storage.
-PREPROCESS_CACHE_MAX_MB,engine,Preprocess & Resources,secondary,Preprocess cache size cap (MB),Soft cap for cache eviction; limits disk usage by pruning old cached files when exceeding this size.
-PREPROCESS_CHANNELS,engine,Preprocess & Resources,secondary,Preprocess channel count,Channels used for cached safe files (1 or 2); should match engine CHANNELS for consistency.
-PREPROCESS_CPU_LIMIT_PCT,engine,Preprocess & Resources,secondary,FFmpeg CPU limit per job (%),"If cpulimit is available, caps CPU usage of each ffmpeg process to this percentage; reduces contention on small hosts."
-PREPROCESS_ENABLE,audio,Preprocess & Resources,primary,Enable FFmpeg preprocessing,"Master switch: when true, tracks are transcoded into 'safe' cached files before playback; enables silence trim, duration cap, and post DSP."
-PREPROCESS_ENFORCE_SAFE,audio,Preprocess & Resources,secondary,Require safe cache before playback,"When true, engine/prefetch waits for safe_* output; if safe isn't ready, it may return empty (or fall back to silence) instead of using the unprocessed original."
-PREPROCESS_FADEIN_S,audio,Preprocess & Resources,secondary,Fade-in duration (seconds),Applies a fade-in at the start of safe files; reduces clicks and helps start playback cleanly.
-PREPROCESS_FADEOUT_P,audio,Preprocess & Resources,secondary,Fade-out curve selector,"Maps a numeric 'power' to a curve family (qsin/hsin/esin) used for fade-out; higher values bias toward smoother, less linear fades."
-PREPROCESS_FADEOUT_S,audio,Preprocess & Resources,secondary,Fade-out duration (seconds),Applies a fade-out near the end (and in bridge tails) to create smooth exits and enable bridge mixing.
-PREPROCESS_FADE_EVAL,audio,Preprocess & Resources,secondary,FFmpeg fade evaluation mode,"Controls how FFmpeg evaluates fade curves (e.g., 'sample' for sample-accurate fades); impacts smoothness/precision of fades."
-PREPROCESS_FFMPEG_THREADS,audio,Preprocess & Resources,secondary,FFmpeg threads per job,Sets ffmpeg -threads for each preprocessing job; lowering reduces CPU spikes and makes timing more deterministic.
-PREPROCESS_FORMAT,audio,Preprocess & Resources,primary,Preprocess output format,Format for cached files ('wav' or 'mp3'); wav avoids lossy re-encode during trimming/packs but costs more disk.
-PREPROCESS_IONICE_CLASS,audio,Preprocess & Resources,secondary,FFmpeg IO scheduling class,"Sets ionice class for ffmpeg disk IO (e.g., 2=best-effort) when ionice is available; helps avoid IO starvation."
-PREPROCESS_IONICE_LEVEL,audio,Preprocess & Resources,secondary,FFmpeg IO scheduling level,"Sets ionice level within class (0-7); higher is lower priority, reducing impact on other processes."
-PREPROCESS_MAX_S,audio,Preprocess & Resources,primary,Maximum safe duration (seconds),Hard cap for produced safe files; trims/limits long tracks to this duration to guarantee predictable transitions and pack alignment.
-PREPROCESS_MP3_BITRATE_KBPS,audio,Preprocess & Resources,secondary,Preprocess MP3 bitrate (kbps),"If PREPROCESS_FORMAT=mp3, bitrate used for cached files; wav is recommended for lossless trimming/packs."
-PREPROCESS_MP3_CBR,audio,Preprocess & Resources,primary,Preprocess MP3 CBR enable,"If PREPROCESS_FORMAT=mp3, toggles constant bitrate mode for cached outputs."
-PREPROCESS_NICE,engine,Preprocess & Resources,secondary,FFmpeg process nice level,Adjusts CPU scheduling priority (higher nice = lower priority) for ffmpeg jobs to protect realtime playback.
-PREPROCESS_POST_ENABLE,engine,Preprocess & Resources,primary,Enable post-processing DSP chain,"Enables loudness gain, HPF, compressor, limiter stages after trimming/transcoding; affects final loudness and dynamics."
-PREPROCESS_SAMPLE_RATE,engine,Preprocess & Resources,secondary,Preprocess sample rate (Hz),Sample rate used for cached safe files; should match engine SAMPLE_RATE to avoid extra resampling.
-PREPROCESS_TTL_H,engine,Preprocess & Resources,secondary,Preprocess cache TTL (hours),"Time-to-live for cached artifacts; higher reduces recomputation, but keeps disk usage longer."
-PREPROCESS_WAIT_S,engine,Preprocess & Resources,secondary,Safe cache wait timeout (seconds),"How long prefetch waits for safe_* to become available; too short yields more fallbacks, too long can block prefetch under heavy load."
-PREPROCESS_WORKERS,engine,Preprocess & Resources,secondary,Preprocess worker count,"Concurrency for preprocessing; more workers = faster warm cache, but more CPU/IO contention."
-PREPROCESS_SILENCE_D,audio,Silence Detection,secondary,Minimum silence duration (seconds),Minimum continuous duration below threshold to qualify as silence; avoids trimming brief low-level passages.
-PREPROCESS_SILENCE_ENABLE,audio,Silence Detection,primary,Enable intro silence trimming,"Uses FFmpeg silencedetect-style analysis to detect leading silence and trims it, improving perceived pacing and reducing dead air."
-PREPROCESS_SILENCE_NOISE_DB,audio,Silence Detection,secondary,Silence threshold (dB),"Noise floor threshold for silence detection (e.g., -20dB): higher (closer to 0) trims more aggressively, risk cutting quiet intros."
-PREPROCESS_SILENCE_SCAN_MAX_S,audio,Silence Detection,secondary,Max scan duration for silence detect (seconds),Only scans the first N seconds for intro silence; keeps preprocessing bounded for long tracks.
-POST_GAIN_DB,audio,Loudness & EQ,secondary,Post output gain (dB),Static gain applied at the final GStreamer volume element before encoding/streaming; adjusts loudness globally without changing dynamics.
-PREPROCESS_HPF_ENABLE,audio,Loudness & EQ,primary,Enable high-pass filter,"When true, applies an HPF to remove subsonic rumble/low-frequency DC-like content; can improve headroom and limiter behavior."
-PREPROCESS_HPF_FREQ,audio,Loudness & EQ,secondary,High-pass cutoff frequency (Hz),"Cutoff frequency for HPF; very low values (5-30Hz) remove rumble without thinning bass, higher values reduce bass weight."
 PREPROCESS_LUFS_GAIN_ENABLE,audio,Loudness & EQ,primary,Enable LUFS-based static gain,"When enabled, preprocess measures integrated loudness and applies a static gain delta (clamped) to align tracks toward a target LUFS without loudnorm re-shaping."
+PREPROCESS_LUFS_I,audio,Loudness & EQ,primary,Target integrated loudness (LUFS),"Desired integrated loudness target (e.g., -12 LUFS). Higher (less negative) = louder output; may trigger limiter more often."
+POST_GAIN_DB,audio,Loudness & EQ,secondary,Post output gain (dB),Static gain applied at the final GStreamer volume element before encoding/streaming; adjusts loudness globally without changing dynamics.
+PREPROCESS_HPF_ENABLE,audio,Loudness & EQ,secondary,Enable high-pass filter,"When true, applies an HPF to remove subsonic rumble/low-frequency DC-like content; can improve headroom and limiter behavior."
+PREPROCESS_HPF_FREQ,audio,Loudness & EQ,secondary,High-pass cutoff frequency (Hz),"Cutoff frequency for HPF; very low values (5-30Hz) remove rumble without thinning bass, higher values reduce bass weight."
 PREPROCESS_LUFS_GAIN_MAX_DB,audio,Loudness & EQ,secondary,Maximum LUFS gain (dB),Upper clamp for gain correction; prevents boosting very quiet tracks into noise/distortion territory.
 PREPROCESS_LUFS_GAIN_MIN_DB,audio,Loudness & EQ,secondary,Minimum LUFS gain (dB),Lower clamp for applied gain correction; prevents over-attenuating very loud masters.
-PREPROCESS_LUFS_I,audio,Loudness & EQ,secondary,Target integrated loudness (LUFS),"Desired integrated loudness target (e.g., -12 LUFS). Higher (less negative) = louder output; may trigger limiter more often."
+PREPROCESS_LIMITER_ENABLE,audio,Dynamics & Limiting,primary,Enable limiter,Applies a true/brickwall-ish limiter stage to prevent peaks exceeding ceiling; protects against clipping after gain/comp.
 PREPROCESS_COMP_ATTACK_MS,audio,Dynamics & Limiting,secondary,Compressor attack time (ms),"How fast compression engages after crossing threshold; shorter clamps transients, longer preserves punch. "
-PREPROCESS_COMP_ENABLE,audio,Dynamics & Limiting,primary,Enable compressor,"Applies FFmpeg compressor to reduce dynamic range (tames peaks, raises quiet parts with makeup). Use carefully to avoid pumping."
+PREPROCESS_COMP_ENABLE,audio,Dynamics & Limiting,secondary,Enable compressor,"Applies FFmpeg compressor to reduce dynamic range (tames peaks, raises quiet parts with makeup). Use carefully to avoid pumping."
 PREPROCESS_COMP_KNEE_DB,audio,Dynamics & Limiting,secondary,Compressor knee (dB),"Softens onset of compression around threshold; larger knee = smoother, less obvious compression."
 PREPROCESS_COMP_MAKEUP_DB,audio,Dynamics & Limiting,secondary,Compressor makeup gain (dB),Gain applied after compression to restore loudness; too much increases noise/distortion risk.
 PREPROCESS_COMP_RATIO,audio,Dynamics & Limiting,secondary,Compressor ratio,"Strength of compression once above threshold (e.g., 2:1). Higher ratios flatten dynamics more."
@@ -70,39 +103,13 @@ PREPROCESS_COMP_RELEASE_MS,audio,Dynamics & Limiting,secondary,Compressor releas
 PREPROCESS_COMP_THRESHOLD_DB,audio,Dynamics & Limiting,secondary,Compressor threshold (dB),"Level above which compression engages; closer to 0 compresses more of the signal, lower compresses only loud peaks. "
 PREPROCESS_LIMITER_ATTACK_MS,audio,Dynamics & Limiting,secondary,Limiter attack time (ms),"How fast limiter clamps peaks; shorter catches transients but can distort, longer preserves transients but risks overs. "
 PREPROCESS_LIMITER_CEILING_DB,audio,Dynamics & Limiting,secondary,Limiter ceiling (dBFS),"Maximum allowed peak level (e.g., -1.0 dBFS) to keep headroom for encoder/streaming."
-PREPROCESS_LIMITER_ENABLE,audio,Dynamics & Limiting,primary,Enable limiter,Applies a true/brickwall-ish limiter stage to prevent peaks exceeding ceiling; protects against clipping after gain/comp.
 PREPROCESS_LIMITER_LEVEL,audio,Dynamics & Limiting,secondary,Limiter auto-leveling mode,"When true (code-dependent), limiter may also level overall signal (can change perceived loudness); keep false for pure peak limiting."
 PREPROCESS_LIMITER_RELEASE_MS,audio,Dynamics & Limiting,secondary,Limiter release time (ms),How fast limiter releases after peak; affects pumping vs transparency.
-CHANNELS,engine,Output (Icecast & Encoding),secondary,Output channel count,"Number of output channels (1=mono, 2=stereo) for the stream; affects spatial image and bandwidth."
-ICECAST_DESCRIPTION,engine,Output (Icecast & Encoding),primary,Stream description,Metadata: longer description sent to Icecast (shown in status page / players).
-ICECAST_GENRE,engine,Output (Icecast & Encoding),primary,Stream genre,Metadata: genre tag sent to Icecast (status page / directory).
-ICECAST_HOST,engine,Output (Icecast & Encoding),primary,Icecast server hostname,Host/IP of the Icecast server shout2send connects to. 
-ICECAST_MOUNT,engine,Output (Icecast & Encoding),primary,Icecast mountpoint,"Mount path on Icecast (e.g., /gst-test.mp3) where the stream is published. "
-ICECAST_NAME,engine,Output (Icecast & Encoding),secondary,Stream display name,Metadata: stream name sent to Icecast (shown in status page / players).
-ICECAST_PASSWORD,engine,Output (Icecast & Encoding),secondary,Icecast source password,Icecast source password used by shout2send to authenticate (matches icecast.xml). 
-ICECAST_PORT,engine,Output (Icecast & Encoding),secondary,Icecast server port,TCP port of the Icecast server (often 8000). 
-ICECAST_PROTOCOL,engine,Output (Icecast & Encoding),secondary,Icecast protocol version,shout2send protocol selector (commonly 3 for Icecast2). Mostly a transport/handshake detail.
-ICECAST_PUBLIC,engine,Output (Icecast & Encoding),primary,Icecast 'public' flag,Advertises the stream as public (directory listing) depending on Icecast setup.
-ICECAST_SEND_TITLE_INFO,engine,Output (Icecast & Encoding),primary,Send per-track title metadata,"When true, engine attempts to push current track title/artist updates to Icecast metadata (can add chatter; keep off if you inject metadata elsewhere)."
-ICECAST_USERNAME,engine,Output (Icecast & Encoding),secondary,Icecast source username,Icecast source username used by shout2send (often 'source'). 
-MP3_BITRATE_KBPS,engine,Output (Icecast & Encoding),secondary,MP3 bitrate (kbps),"lamemp3enc target bitrate; higher increases quality/bandwidth, lower reduces bandwidth but may introduce artifacts."
-MP3_CBR,engine,Output (Icecast & Encoding),primary,MP3 constant bitrate enable,"When true, forces CBR mode in MP3 encoder; improves predictability for some clients at the cost of efficiency on complex audio."
-SAMPLE_RATE,engine,Output (Icecast & Encoding),secondary,Output sample rate (Hz),"Target PCM sample rate for the GStreamer pipeline and encoding stage (e.g., 44100). Affects resampling cost and potential HF roll-off if downsampled."
-SWITCH_GUARD_HOLD_S,engine,Playback Engine,secondary,Switch guard hold time (seconds),Minimum hold time during which additional set_uri calls are ignored (reentrancy guard); reduces accidental double-switch in fast callbacks.
-SCHED_PREPROCESS_DISABLE_PLAYLISTS,engine,Scheduler & Time,primary,Disable trim on certain playlists,"select playlist for witch you don't want to trim every ""maximum cap s"", like mixes or podcast"
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-,,,,,
-
+AUDIO_FEATURES_DB,audio,Audio Analysis Daemon,primary,Audio features SQLite DB path,SQLite database produced by the offline audio analysis daemon (BPM + loudness). Must be located in the shared cache volume (default /tmp/azurmix_cache/features.db).
+AUDIO_FEATURES_SCAN_INTERVAL_S,audio,Audio Analysis Daemon,primary,Daemon scan interval (seconds),Period between scan passes of the media library. Lower reacts faster but increases background IO/CPU.
+AUDIO_FEATURES_DISABLE_BPM,audio,Audio Analysis Daemon,secondary,Disable BPM extraction,"When truthy, BPM extraction is disabled (loudness still computed). Useful if bpmdetect is unavailable or for debugging."
+AUDIO_FEATURES_FX_LUFS_THRESHOLD,audio,Audio Analysis Daemon,secondary,FX LUFS threshold (is_fx tagging),"If integrated loudness (LUFS-I) is <= threshold, the daemon tags the file as FX/jingle (is_fx=1) and BPM is suppressed (stored NULL) to avoid polluting tempo decisioning."
+AUDIO_FEATURES_FX_PATH_REGEX,audio,Audio Analysis Daemon,secondary,FX path regex (is_fx tagging),"Regex applied on rel_path (lowercased) to tag FX/jingles (is_fx=1). Typical patterns: /jingles/, /fx/, /sfx/, or numeric-prefix samples."
+AUDIO_FEATURES_PROBE_S,audio,Audio Analysis Daemon,secondary,Per-track probe duration (seconds),Duration analyzed per track for feature extraction. Higher can improve BPM stability but costs more CPU.
+AUDIO_FEATURES_STATE,audio,Audio Analysis Daemon,secondary,Audio features daemon state JSON path,"Path to the daemon state JSON (progress/metrics, last scan, etc.). Useful for diagnostics and dashboards."
+AUDIO_FEATURES_TIMEOUT_S,audio,Audio Analysis Daemon,secondary,Per-track analysis timeout (seconds),Hard timeout per track analysis (FFmpeg ebur128 + GStreamer bpmdetect). Prevents long stalls on broken files.
