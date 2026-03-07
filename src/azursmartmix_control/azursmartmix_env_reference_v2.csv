@@ -9,6 +9,8 @@ SCHED_CONFIG,engine,Scheduler,secondary,Scheduler config file path,"Filesystem p
 SCHED_HTTP_HOST,engine,Scheduler,secondary,Scheduler HTTP bind address,IP/interface FastAPI/Uvicorn binds to inside the container (0.0.0.0 to listen on all interfaces).
 SCHED_RETRY_S,engine,Scheduler,secondary,Scheduler retry backoff (seconds),Sleep duration before retrying after a failed/empty scheduler response; impacts responsiveness under scheduler/API issues.
 SCHED_TIMEOUT,engine,Scheduler,secondary,Scheduler HTTP timeout (seconds),"Timeout for HTTP calls to the scheduler; too low can cause transient 'no next track', too high can stall prefetch on scheduler hiccups."
+SCHED_HARD_SLOT_END_ENABLE,engine,Scheduler,primary,Force scheduled slot end at exact time,"When truthy, the engine forcibly exits a scheduled playlist at the slot end time instead of letting a long track or mix overrun the window; applies to both bridge and non-bridge modes."
+SCHED_DEADLINE_POLL_MS,engine,Scheduler,secondary,Scheduled slot deadline poll interval (milliseconds),"Polling interval used by the engine to check whether a scheduled slot end deadline has been reached; lower values react faster but slightly increase runtime polling overhead."
 TZ,engine,Scheduler,secondary,Timezone (IANA),"Timezone used for schedule evaluation and human-friendly timestamps (e.g., Europe/Paris). Does not affect audio, only schedule timing and log timestamps."
 PREFETCH_TARGET,engine,Prefetch & Selection,primary,Prefetch queue target depth (tracks),"Target number of upcoming URIs buffered in the engine queue; higher improves resiliency, but increases RAM/disk churn (especially with preprocessing)."
 TEMPO_LIMIT_ENABLE,engine,Prefetch & Selection,primary,Enable tempo-based selection gate,"When true, prefetch will ACCEPT/REJECT scheduler candidates based on BPM delta between consecutive tracks (consumes BPM from DB)."
@@ -113,3 +115,4 @@ AUDIO_FEATURES_FX_PATH_REGEX,audio,Audio Analysis Daemon,secondary,FX path regex
 AUDIO_FEATURES_PROBE_S,audio,Audio Analysis Daemon,secondary,Per-track probe duration (seconds),Duration analyzed per track for feature extraction. Higher can improve BPM stability but costs more CPU.
 AUDIO_FEATURES_STATE,audio,Audio Analysis Daemon,secondary,Audio features daemon state JSON path,"Path to the daemon state JSON (progress/metrics, last scan, etc.). Useful for diagnostics and dashboards."
 AUDIO_FEATURES_TIMEOUT_S,audio,Audio Analysis Daemon,secondary,Per-track analysis timeout (seconds),Hard timeout per track analysis (FFmpeg ebur128 + GStreamer bpmdetect). Prevents long stalls on broken files.
+
