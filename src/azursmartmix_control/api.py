@@ -235,6 +235,47 @@ def create_api(settings: Settings) -> FastAPI:
 
     # --- (tout le reste de ton API existante inchangée) ---
 
+    def _engine_titles_to_upcoming_entries(
+        titles: List[str],
+        upcoming_sched: Dict[str, Any],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        if not isinstance(titles, list) or not titles:
+            return []
+
+        sched_map: Dict[str, Dict[str, Any]] = {}
+        if isinstance(upcoming_sched, dict) and upcoming_sched.get("ok"):
+            raw_sched = upcoming_sched.get("upcoming") or []
+            if isinstance(raw_sched, list):
+                for entry in raw_sched:
+                    if not isinstance(entry, dict):
+                        continue
+                    norm = docker_client.normalize_title(str(entry.get("title") or ""))
+                    if norm and norm not in sched_map:
+                        sched_map[norm] = entry
+
+        out: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for raw_title in titles:
+            title = str(raw_title or "").strip()
+            norm = docker_client.normalize_title(title)
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            sched_entry = sched_map.get(norm) or {}
+            out.append(
+                {
+                    "title": sched_entry.get("title") or title,
+                    "title_display": sched_entry.get("title_display") or docker_client.display_title(title),
+                    "playlist": sched_entry.get("playlist"),
+                    "ts": sched_entry.get("ts"),
+                }
+            )
+            if len(out) >= limit:
+                break
+
+        return out
+
     def _compute_effective_now_and_upcoming(
         title_observed: Optional[str],
         upcoming_sched: Dict[str, Any],
@@ -367,21 +408,26 @@ def create_api(settings: Settings) -> FastAPI:
             if isinstance(u2, list):
                 upcoming_titles = [str(x) for x in u2]
 
+        engine_upcoming = _engine_titles_to_upcoming_entries(upcoming_titles, upcoming_sched, n)
+        using_engine = bool(engine_upcoming)
+
         return {
             "ok": True,
             "current_title_observed": current_title,
             "source": {
-                "primary": upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None,
-                "secondary": upcoming_engine.get("source") if isinstance(upcoming_engine, dict) else None,
+                "primary": upcoming_engine.get("source") if using_engine and isinstance(upcoming_engine, dict) else (upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None),
+                "secondary": upcoming_sched.get("source") if using_engine and isinstance(upcoming_sched, dict) else (upcoming_engine.get("source") if isinstance(upcoming_engine, dict) else None),
             },
-            "upcoming": effective_upcoming,
-            "upcoming_titles": upcoming_titles,
+            "upcoming": (engine_upcoming if using_engine else effective_upcoming)[:n],
+            "upcoming_titles": upcoming_titles[:n],
             "debug": {
                 "observed_norm": eff.get("observed_norm"),
                 "promoted_now": eff.get("effective_now"),
                 "raw_upcoming_head": (eff.get("raw_upcoming") or [])[:3],
                 "scheduler": upcoming_sched,
                 "engine_preprocess": upcoming_engine,
+                "engine_upcoming": engine_upcoming[:n],
+                "used_source": "engine" if using_engine else "scheduler",
             },
         }
 
