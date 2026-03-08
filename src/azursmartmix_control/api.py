@@ -328,6 +328,15 @@ def create_api(settings: Settings) -> FastAPI:
             tail=3000,
         )
 
+        upcoming_engine = docker_client.compute_upcoming_from_preprocess(
+            engine_container=settings.engine_container,
+            current_title=title_observed,
+            n=12,
+            tail=2500,
+        )
+        engine_upcoming = _engine_titles_to_upcoming_entries(upcoming_engine, upcoming_sched, 12)
+        using_engine = bool(engine_upcoming)
+
         ss = docker_client.last_engine_stream_start(
             engine_container=settings.engine_container,
             tail=1000,
@@ -354,21 +363,22 @@ def create_api(settings: Settings) -> FastAPI:
         title_effective = title_observed
         playlist_effective = playlist_observed
 
-        predicted_next = None
-        if effective_now and isinstance(effective_now, dict):
-            title_effective = effective_now.get("title_display") or docker_client.display_title(
-                str(effective_now.get("title") or "")
-            )
-            playlist_effective = effective_now.get("playlist") or playlist_effective
-            now_mode = "promoted_from_upcoming"
+        predicted_next = engine_upcoming[0] if using_engine else None
+        if predicted_next is None:
+            if effective_now and isinstance(effective_now, dict):
+                title_effective = effective_now.get("title_display") or docker_client.display_title(
+                    str(effective_now.get("title") or "")
+                )
+                playlist_effective = effective_now.get("playlist") or playlist_effective
+                now_mode = "promoted_from_upcoming"
 
-            effective_upcoming = eff.get("effective_upcoming") or []
-            if isinstance(effective_upcoming, list) and effective_upcoming:
-                predicted_next = effective_upcoming[0]
-        else:
-            raw_up = eff.get("raw_upcoming") or []
-            if isinstance(raw_up, list) and raw_up:
-                predicted_next = raw_up[0]
+                effective_upcoming = eff.get("effective_upcoming") or []
+                if isinstance(effective_upcoming, list) and effective_upcoming:
+                    predicted_next = effective_upcoming[0]
+            else:
+                raw_up = eff.get("raw_upcoming") or []
+                if isinstance(raw_up, list) and raw_up:
+                    predicted_next = raw_up[0]
 
         bpm_effective = bpm_observed.get("bpm") if isinstance(bpm_observed, dict) else None
 
@@ -388,9 +398,13 @@ def create_api(settings: Settings) -> FastAPI:
             "predicted_next": predicted_next,
             "debug": {
                 "observed_norm": eff.get("observed_norm"),
-                "upcoming_primary_source": upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None,
+                "upcoming_primary_source": (
+                    upcoming_engine.get("source") if using_engine and isinstance(upcoming_engine, dict)
+                    else (upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None)
+                ),
                 "upcoming_count_raw": len(eff.get("raw_upcoming") or []),
                 "promoted": bool(effective_now),
+                "predicted_next_source": "engine" if using_engine else "scheduler",
             },
         }
 
