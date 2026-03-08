@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import datetime as dt
 import os
 import re
@@ -47,6 +48,15 @@ class DockerClient:
     )
 
     _RE_STREAM_START = re.compile(r"\bBUS\s+STREAM_START\b.*\bsrc=playbin\b", re.IGNORECASE)
+
+    _RE_TEMPO_SELECT_OK_META = re.compile(
+        r"""\btempo\(select(?::first)?\):\s*ok=True\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
+        re.IGNORECASE,
+    )
+    _RE_TEMPO_SELECT_OK_REL = re.compile(
+        r"""\btempo\(select\):\s*ok=True\b.*?\brel=(?P<rel>[^\s]+)""",
+        re.IGNORECASE,
+    )
 
     def __init__(self) -> None:
         self.client = docker.from_env()
@@ -277,6 +287,54 @@ class DockerClient:
         s = re.sub(r"\s+", " ", s).strip()
         return s
 
+    @staticmethod
+    def _coerce_rel_title(rel: str) -> Optional[str]:
+        s = (rel or "").strip()
+        if not s:
+            return None
+        return DockerClient.display_title(os.path.basename(s)) or None
+
+    def extract_tempo_selected_titles(self, engine_container: str, tail: int = 2500) -> Dict[str, Any]:
+        txt = self.tail_logs(engine_container, tail=tail)
+        if not txt or txt.startswith("[control]"):
+            return {
+                "ok": False,
+                "source": "engine_logs_tempo",
+                "engine_container": engine_container,
+                "error": txt.strip() if txt else "empty logs",
+                "titles": [],
+            }
+
+        titles: List[str] = []
+        for raw in txt.splitlines():
+            line = self._strip_docker_prefix(raw)
+
+            m_meta = self._RE_TEMPO_SELECT_OK_META.search(line)
+            if m_meta:
+                try:
+                    meta = ast.literal_eval((m_meta.group("meta") or "").strip())
+                except Exception:
+                    meta = None
+                if isinstance(meta, dict):
+                    t = self._coerce_rel_title(str(meta.get("b_rel") or ""))
+                    if t:
+                        titles.append(t)
+                        continue
+
+            m_rel = self._RE_TEMPO_SELECT_OK_REL.search(line)
+            if m_rel:
+                t = self._coerce_rel_title(m_rel.group("rel") or "")
+                if t:
+                    titles.append(t)
+
+        return {
+            "ok": True,
+            "source": "engine_logs_tempo",
+            "engine_container": engine_container,
+            "titles": titles,
+            "count": len(titles),
+        }
+
     # ----------------------- Engine preprocess (compat) -----------------------
 
     def _clean_preprocess_title(self, rest: str) -> Optional[str]:
@@ -317,6 +375,38 @@ class DockerClient:
         return {"ok": True, "source": "engine_logs", "engine_container": engine_container, "titles": titles, "count": len(titles)}
 
     def compute_upcoming_from_preprocess(self, engine_container: str, current_title: Optional[str], n: int = 10, tail: int = 2500) -> Dict[str, Any]:
+        tempo_data = self.extract_tempo_selected_titles(engine_container, tail=tail)
+        if tempo_data.get("ok"):
+            tempo_titles = [t for t in (tempo_data.get("titles") or []) if isinstance(t, str) and t.strip()]
+            if tempo_titles:
+                cur_norm = self.normalize_title(current_title or "")
+                start_idx = None
+
+                if cur_norm:
+                    for i in range(len(tempo_titles) - 1, -1, -1):
+                        if self.normalize_title(tempo_titles[i]) == cur_norm:
+                            start_idx = i + 1
+                            break
+
+                if start_idx is None:
+                    chunk = self._dedupe_keep_order(tempo_titles[-(n * 4) :])
+                    return {
+                        "ok": True,
+                        "source": "engine_logs_tempo_fallback_tail",
+                        "current_title_found": False,
+                        "current_title": current_title,
+                        "upcoming": chunk[:n],
+                    }
+
+                chunk2 = self._dedupe_keep_order(tempo_titles[start_idx:])
+                return {
+                    "ok": True,
+                    "source": "engine_logs_tempo_after_current",
+                    "current_title_found": True,
+                    "current_title": current_title,
+                    "upcoming": chunk2[:n],
+                }
+
         data = self.extract_preprocess_titles(engine_container, tail=tail)
         if not data.get("ok"):
             return {"ok": False, "error": data.get("error"), "upcoming": [], "source": "engine_logs"}
@@ -325,21 +415,33 @@ class DockerClient:
         if not titles:
             return {"ok": False, "error": "no preprocess titles found", "upcoming": [], "source": "engine_logs"}
 
-        cur = (current_title or "").strip()
+        cur_norm = self.normalize_title(current_title or "")
         start_idx = None
 
-        if cur:
+        if cur_norm:
             for i in range(len(titles) - 1, -1, -1):
-                if titles[i].strip() == cur:
+                if self.normalize_title(titles[i]) == cur_norm:
                     start_idx = i + 1
                     break
 
         if start_idx is None:
             chunk = self._dedupe_keep_order(titles[-(n * 4) :])
-            return {"ok": True, "source": "engine_logs_fallback_tail", "current_title_found": False, "current_title": current_title, "upcoming": chunk[:n]}
+            return {
+                "ok": True,
+                "source": "engine_logs_preprocess_fallback_tail",
+                "current_title_found": False,
+                "current_title": current_title,
+                "upcoming": chunk[:n],
+            }
 
         chunk2 = self._dedupe_keep_order(titles[start_idx:])
-        return {"ok": True, "source": "engine_logs_after_current", "current_title_found": True, "current_title": current_title, "upcoming": chunk2[:n]}
+        return {
+            "ok": True,
+            "source": "engine_logs_preprocess_after_current",
+            "current_title_found": True,
+            "current_title": current_title,
+            "upcoming": chunk2[:n],
+        }
 
     # ----------------------- Scheduler NEXT -----------------------
 
