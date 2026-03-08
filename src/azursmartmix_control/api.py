@@ -206,6 +206,18 @@ def create_api(settings: Settings) -> FastAPI:
         # legacy: read-only view from mounted compose file inside container
         return get_service_env(settings.compose_path, settings.compose_service_engine)
 
+    @app.get("/panel/resources")
+    def panel_resources() -> Dict[str, Any]:
+        raw = docker_client.host_resources_summary()
+        return {
+            "ok": bool(raw.get("ok")),
+            "now_utc": raw.get("now_utc"),
+            "source": raw.get("source"),
+            "cpu": raw.get("cpu") or {},
+            "memory": raw.get("memory") or {},
+            "loadavg": raw.get("loadavg") or {},
+        }
+
     @app.get("/panel/runtime")
     def panel_runtime() -> Dict[str, Any]:
         raw = docker_client.runtime_summary(settings.engine_container, settings.scheduler_container)
@@ -236,15 +248,11 @@ def create_api(settings: Settings) -> FastAPI:
     # --- (tout le reste de ton API existante inchangée) ---
 
     def _engine_titles_to_upcoming_entries(
-        upcoming_engine: Dict[str, Any],
+        titles: List[str],
         upcoming_sched: Dict[str, Any],
         limit: int,
     ) -> List[Dict[str, Any]]:
-        if not isinstance(upcoming_engine, dict) or not upcoming_engine.get("ok"):
-            return []
-
-        engine_items = upcoming_engine.get("upcoming") or []
-        if not isinstance(engine_items, list) or not engine_items:
+        if not isinstance(titles, list) or not titles:
             return []
 
         sched_map: Dict[str, Dict[str, Any]] = {}
@@ -260,10 +268,8 @@ def create_api(settings: Settings) -> FastAPI:
 
         out: List[Dict[str, Any]] = []
         seen: set[str] = set()
-        for raw_item in engine_items:
-            if not isinstance(raw_item, dict):
-                continue
-            title = str(raw_item.get("title") or raw_item.get("title_display") or "").strip()
+        for raw_title in titles:
+            title = str(raw_title or "").strip()
             norm = docker_client.normalize_title(title)
             if not norm or norm in seen:
                 continue
@@ -271,12 +277,10 @@ def create_api(settings: Settings) -> FastAPI:
             sched_entry = sched_map.get(norm) or {}
             out.append(
                 {
-                    "title": sched_entry.get("title") or raw_item.get("title") or title,
-                    "title_display": raw_item.get("title_display") or sched_entry.get("title_display") or docker_client.display_title(title),
+                    "title": sched_entry.get("title") or title,
+                    "title_display": sched_entry.get("title_display") or docker_client.display_title(title),
                     "playlist": sched_entry.get("playlist"),
                     "ts": sched_entry.get("ts"),
-                    "bpm": raw_item.get("bpm"),
-                    "decision": raw_item.get("decision"),
                 }
             )
             if len(out) >= limit:
@@ -328,25 +332,10 @@ def create_api(settings: Settings) -> FastAPI:
             tail=3000,
         )
 
-        upcoming_engine = docker_client.compute_upcoming_from_preprocess(
-            engine_container=settings.engine_container,
-            current_title=title_observed,
-            n=12,
-            tail=2500,
-        )
-        engine_upcoming = _engine_titles_to_upcoming_entries(upcoming_engine, upcoming_sched, 12)
-        using_engine = bool(engine_upcoming)
-
         ss = docker_client.last_engine_stream_start(
             engine_container=settings.engine_container,
             tail=1000,
             recent_window_s=12,
-        )
-
-        bpm_observed = docker_client.infer_bpm_for_title_from_engine(
-            engine_container=settings.engine_container,
-            title=title_observed,
-            tail=2500,
         )
 
         pl_observed = docker_client.infer_playlist_for_title_from_scheduler(
@@ -363,24 +352,21 @@ def create_api(settings: Settings) -> FastAPI:
         title_effective = title_observed
         playlist_effective = playlist_observed
 
-        predicted_next = engine_upcoming[0] if using_engine else None
-        if predicted_next is None:
-            if effective_now and isinstance(effective_now, dict):
-                title_effective = effective_now.get("title_display") or docker_client.display_title(
-                    str(effective_now.get("title") or "")
-                )
-                playlist_effective = effective_now.get("playlist") or playlist_effective
-                now_mode = "promoted_from_upcoming"
+        predicted_next = None
+        if effective_now and isinstance(effective_now, dict):
+            title_effective = effective_now.get("title_display") or docker_client.display_title(
+                str(effective_now.get("title") or "")
+            )
+            playlist_effective = effective_now.get("playlist") or playlist_effective
+            now_mode = "promoted_from_upcoming"
 
-                effective_upcoming = eff.get("effective_upcoming") or []
-                if isinstance(effective_upcoming, list) and effective_upcoming:
-                    predicted_next = effective_upcoming[0]
-            else:
-                raw_up = eff.get("raw_upcoming") or []
-                if isinstance(raw_up, list) and raw_up:
-                    predicted_next = raw_up[0]
-
-        bpm_effective = bpm_observed.get("bpm") if isinstance(bpm_observed, dict) else None
+            effective_upcoming = eff.get("effective_upcoming") or []
+            if isinstance(effective_upcoming, list) and effective_upcoming:
+                predicted_next = effective_upcoming[0]
+        else:
+            raw_up = eff.get("raw_upcoming") or []
+            if isinstance(raw_up, list) and raw_up:
+                predicted_next = raw_up[0]
 
         return {
             "ok": bool(title_effective),
@@ -391,20 +377,14 @@ def create_api(settings: Settings) -> FastAPI:
             "playlist_effective": playlist_effective,
             "title_observed": title_observed,
             "playlist_observed": playlist_observed,
-            "bpm_effective": bpm_effective,
-            "bpm_observed": bpm_observed.get("bpm") if isinstance(bpm_observed, dict) else None,
             "scheduler_match_observed": pl_observed.get("match") if isinstance(pl_observed, dict) else None,
             "engine_stream_start": ss,
             "predicted_next": predicted_next,
             "debug": {
                 "observed_norm": eff.get("observed_norm"),
-                "upcoming_primary_source": (
-                    upcoming_engine.get("source") if using_engine and isinstance(upcoming_engine, dict)
-                    else (upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None)
-                ),
+                "upcoming_primary_source": upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None,
                 "upcoming_count_raw": len(eff.get("raw_upcoming") or []),
                 "promoted": bool(effective_now),
-                "predicted_next_source": "engine" if using_engine else "scheduler",
             },
         }
 
@@ -434,10 +414,14 @@ def create_api(settings: Settings) -> FastAPI:
             n=n,
             tail=2500,
         )
+        upcoming_titles: List[str] = []
+        if isinstance(upcoming_engine, dict) and upcoming_engine.get("ok"):
+            u2 = upcoming_engine.get("upcoming") or []
+            if isinstance(u2, list):
+                upcoming_titles = [str(x) for x in u2]
 
-        engine_upcoming = _engine_titles_to_upcoming_entries(upcoming_engine, upcoming_sched, n)
+        engine_upcoming = _engine_titles_to_upcoming_entries(upcoming_titles, upcoming_sched, n)
         using_engine = bool(engine_upcoming)
-        upcoming_titles: List[str] = [str(x.get("title_display") or x.get("title") or "") for x in engine_upcoming if isinstance(x, dict)]
 
         return {
             "ok": True,
