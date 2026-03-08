@@ -165,7 +165,7 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .az-item .idx{ display:inline-block; min-width:24px; font-weight:950; color: rgba(255,255,255,.75); }
 .az-item .txt{ font-weight:650; }
 
-.rt-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }
+.rt-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 900px){ .rt-grid{ grid-template-columns: 1fr; } }
 
 .rt-box{
@@ -173,9 +173,6 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
   border-radius: 10px;
   background: rgba(0,0,0,.10);
   overflow: hidden;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
 }
 .rt-box-h{
   padding: 10px 12px;
@@ -183,37 +180,15 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
   border-bottom: 1px solid rgba(255,255,255,.08);
   color: rgba(255,255,255,.92);
 }
-.rt-table{ width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
+.rt-table{ width: 100%; border-collapse: collapse; font-size: 14px; }
 .rt-table tr td{
   padding: 8px 12px;
   border-bottom: 1px solid rgba(255,255,255,.06);
   vertical-align: top;
 }
 .rt-table tr:last-child td{ border-bottom: none; }
-.rt-k{ width: 132px; color: var(--az-muted); white-space: nowrap; }
-.rt-v{ color: rgba(255,255,255,.92); font-family: var(--az-mono); word-break: break-word; width: 100%; }
-
-.az-grid-3{ display:grid; grid-template-columns: .80fr 1.20fr; gap: var(--grid-gap); align-items: stretch; }
-.az-grid-3 > .az-card{ height: 100%; }
-@media (max-width: 1200px){ .az-grid-3{ grid-template-columns: 1fr; } }
-
-.res-shell{ display:flex; flex-direction:column; gap:12px; }
-.res-top{ display:grid; grid-template-columns: 1fr auto; gap:10px; align-items:end; }
-.res-big{ font-size: 34px; font-weight: 950; line-height:1; }
-.res-big .unit{ font-size: 15px; opacity:.72; margin-left: 4px; font-weight:800; }
-.res-sub{ color: var(--az-muted); font-size: 13px; font-family: var(--az-mono); }
-.res-pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid var(--az-border); background: rgba(255,255,255,.04); font-size:12px; font-weight:900; }
-.res-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
-@media (max-width: 700px){ .res-grid{ grid-template-columns: 1fr; } }
-.res-box{ border: 1px solid var(--az-border); border-radius: 12px; background: rgba(0,0,0,.12); padding: 12px; }
-.res-box-h{ display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; font-weight:900; }
-.res-box-h .mini{ color: var(--az-muted); font-size: 12px; font-weight:700; }
-.res-bar{ height: 10px; width:100%; border-radius: 999px; overflow:hidden; background: rgba(255,255,255,.08); }
-.res-bar > span{ display:block; height:100%; border-radius:999px; }
-.res-bar-cpu > span{ background: linear-gradient(90deg, #22d3ee, #1e88e5); }
-.res-bar-mem > span{ background: linear-gradient(90deg, #60a5fa, #a78bfa); }
-.res-kpis{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:8px; font-size: 13px; }
-.res-kpis .v{ font-family: var(--az-mono); font-weight: 900; color: rgba(255,255,255,.92); }
+.rt-k{ width: 140px; color: var(--az-muted); }
+.rt-v{ color: rgba(255,255,255,.92); font-family: var(--az-mono); word-break: break-word; }
 
 .console-frame{
   height: 420px;
@@ -477,10 +452,6 @@ class ControlUI:
         self._rt_engine_tbl = None
         self._rt_sched_tbl = None
 
-        self._res_cpu_html = None
-        self._res_mem_html = None
-        self._res_host_meta = None
-
         self._now_title = None
         self._now_meta = None
         self._now_player = None
@@ -507,6 +478,7 @@ class ControlUI:
         self._tabs = None
         self._tab_dashboard = "Dashboard"
         self._tab_settings = "Settings"
+        self._active_tab = self._tab_dashboard
 
         self._settings_service = "engine"
         self._settings_advanced = False
@@ -791,22 +763,20 @@ class ControlUI:
 
                 ui.separator().props("vertical").style("height:26px; opacity:.35;")
 
-                ui.button("Refresh", on_click=self.refresh_all).props("unelevated color=white text-color=primary")
+                ui.button("Refresh", on_click=self.refresh_visible).props("unelevated color=white text-color=primary")
                 ui.button("Auto 5s", on_click=self.enable_autorefresh).props("outline")
                 ui.button("Stop Auto", on_click=self.disable_autorefresh).props("outline")
 
         with ui.element("div").classes("az-wrap"):
             with ui.element("div").classes("az-tabsbar"):
-                with ui.tabs().classes("w-full") as self._tabs:
+                with ui.tabs(value=self._tab_dashboard, on_change=self._on_main_tab_change).classes("w-full") as self._tabs:
                     ui.tab(self._tab_dashboard)
                     ui.tab(self._tab_settings)
 
             with ui.tab_panels(self._tabs, value=self._tab_dashboard).classes("w-full"):
                 with ui.tab_panel(self._tab_dashboard):
-                    with ui.element("div").classes("az-grid-3"):
-                        self._card_resources()
+                    with ui.element("div").classes("az-grid"):
                         self._card_runtime()
-                    with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
                         self._card_now()
                         self._card_upcoming()
                     with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
@@ -815,7 +785,7 @@ class ControlUI:
                 with ui.tab_panel(self._tab_settings):
                     self._card_settings()
 
-        ui.timer(0.1, self.refresh_all, once=True)
+        ui.timer(0.1, self.refresh_dashboard, once=True)
         ui.timer(0.2, self.refresh_settings, once=True)
 
     def _on_tag_change(self, e) -> None:
@@ -897,7 +867,7 @@ class ControlUI:
             if clears_restart_hint:
                 self._set_restart_needed(False)
 
-            await self.refresh_all()
+            await self.refresh_dashboard()
         except Exception as e:
             if self._ops_html:
                 self._ops_html.set_content(f'<div class="console-content">{html.escape(f"== {label} ==\\nerror: {e}\\n")}</div>')
@@ -955,76 +925,6 @@ class ControlUI:
         ]
         tr = "".join(f'<tr><td class="rt-k">{html.escape(k)}</td><td class="rt-v" data-copy="{val}">{val}</td></tr>' for k, val in rows)
         return f'<table class="rt-table">{tr}</table>'
-
-    def _card_resources(self) -> None:
-        with ui.element("div").classes("az-card"):
-            with ui.element("div").classes("az-card-h"):
-                ui.label("Resources")
-                self._res_host_meta = ui.html('<span class="res-pill">host: …</span>')
-            with ui.element("div").classes("az-card-b"):
-                with ui.element("div").classes("res-shell"):
-                    self._res_cpu_html = ui.html(self._resources_cpu_html({}))
-                    self._res_mem_html = ui.html(self._resources_mem_html({}))
-
-    @staticmethod
-    def _fmt_bytes_gb(value: Any) -> str:
-        try:
-            n = float(value)
-            if n <= 0:
-                return "0.00 GB"
-            return f"{n / (1024 ** 3):.2f} GB"
-        except Exception:
-            return "—"
-
-    def _resources_cpu_html(self, data: Dict[str, Any]) -> str:
-        cpu = data.get("cpu") if isinstance(data.get("cpu"), dict) else {}
-        loadavg = data.get("loadavg") if isinstance(data.get("loadavg"), dict) else {}
-        pct = cpu.get("percent")
-        pct_num = float(pct) if isinstance(pct, (int, float)) else 0.0
-        pct_txt = f"{pct_num:.2f}" if isinstance(pct, (int, float)) else "—"
-        l1 = loadavg.get("one")
-        l5 = loadavg.get("five")
-        load_txt = f"{l1:.2f} / {l5:.2f}" if isinstance(l1, (int, float)) and isinstance(l5, (int, float)) else "—"
-        width = max(0.0, min(100.0, pct_num))
-        return (
-            '<div class="res-box">'
-            '<div class="res-box-h"><span>CPU</span><span class="mini">load 1/5m</span></div>'
-            '<div class="res-top">'
-            f'<div class="res-big">{pct_txt}<span class="unit">%</span></div>'
-            f'<div class="res-sub">{html.escape(load_txt)}</div>'
-            '</div>'
-            f'<div class="res-bar res-bar-cpu"><span style="width:{width:.2f}%;"></span></div>'
-            '<div class="res-kpis">'
-            f'<div><span class="t-dim">sample</span> <span class="v">{html.escape(str(cpu.get("sample") or "—"))}</span></div>'
-            f'<div><span class="t-dim">source</span> <span class="v">{html.escape(str(data.get("source") or "—"))}</span></div>'
-            '</div>'
-            '</div>'
-        )
-
-    def _resources_mem_html(self, data: Dict[str, Any]) -> str:
-        mem = data.get("memory") if isinstance(data.get("memory"), dict) else {}
-        used = mem.get("used_bytes")
-        total = mem.get("total_bytes")
-        avail = mem.get("available_bytes")
-        cached = mem.get("cached_bytes")
-        pct = mem.get("used_percent")
-        pct_num = float(pct) if isinstance(pct, (int, float)) else 0.0
-        pct_txt = f"{pct_num:.2f}" if isinstance(pct, (int, float)) else "—"
-        width = max(0.0, min(100.0, pct_num))
-        return (
-            '<div class="res-box">'
-            '<div class="res-box-h"><span>Memory</span><span class="mini">used / total</span></div>'
-            '<div class="res-top">'
-            f'<div class="res-big">{html.escape(self._fmt_bytes_gb(used))}</div>'
-            f'<div class="res-sub">{pct_txt}%</div>'
-            '</div>'
-            f'<div class="res-bar res-bar-mem"><span style="width:{width:.2f}%;"></span></div>'
-            '<div class="res-grid">'
-            f'<div class="res-kpis"><div><span class="t-dim">total</span> <span class="v">{html.escape(self._fmt_bytes_gb(total))}</span></div><div><span class="t-dim">avail</span> <span class="v">{html.escape(self._fmt_bytes_gb(avail))}</span></div></div>'
-            f'<div class="res-kpis"><div><span class="t-dim">cached</span> <span class="v">{html.escape(self._fmt_bytes_gb(cached))}</span></div><div><span class="t-dim">used</span> <span class="v">{pct_txt}%</span></div></div>'
-            '</div>'
-            '</div>'
-        )
 
     def _card_now(self) -> None:
         stream_url = self._stream_public_url()
@@ -1393,27 +1293,28 @@ class ControlUI:
             r.raise_for_status()
             return r.text
 
-    async def refresh_all(self) -> None:
-        await self.refresh_resources()
+    def _on_main_tab_change(self, e) -> None:
+        try:
+            self._active_tab = str(e.value).strip() if e.value is not None else self._tab_dashboard
+        except Exception:
+            self._active_tab = self._tab_dashboard
+
+        if self._active_tab == self._tab_settings:
+            ui.timer(0.01, self.refresh_settings, once=True)
+        else:
+            ui.timer(0.01, self.refresh_dashboard, once=True)
+
+    async def refresh_visible(self) -> None:
+        if self._active_tab == self._tab_settings:
+            await self.refresh_settings()
+            return
+        await self.refresh_dashboard()
+
+    async def refresh_dashboard(self) -> None:
         await self.refresh_runtime()
         await self.refresh_now()
         await self.refresh_upcoming()
         await self.refresh_logs()
-        await self.refresh_settings()
-
-    async def refresh_resources(self) -> None:
-        try:
-            data = await self._get_json("/panel/resources")
-        except Exception:
-            data = {}
-
-        if self._res_host_meta:
-            src = html.escape(str(data.get("source") or "host"))
-            self._res_host_meta.set_content(f'<span class="res-pill">source: {src}</span>')
-        if self._res_cpu_html:
-            self._res_cpu_html.set_content(self._resources_cpu_html(data if isinstance(data, dict) else {}))
-        if self._res_mem_html:
-            self._res_mem_html.set_content(self._resources_mem_html(data if isinstance(data, dict) else {}))
 
     async def refresh_runtime(self) -> None:
         try:
@@ -1513,7 +1414,7 @@ class ControlUI:
     def enable_autorefresh(self) -> None:
         if self._timer is not None:
             return
-        self._timer = ui.timer(5.0, self.refresh_all)
+        self._timer = ui.timer(5.0, self.refresh_dashboard)
 
     def disable_autorefresh(self) -> None:
         if self._timer is not None:
