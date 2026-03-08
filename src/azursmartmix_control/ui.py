@@ -457,6 +457,7 @@ class ControlUI:
         self._now_player = None
 
         self._up_list_container = None
+        self._up_source_label = None
 
         self._log_html_engine = None
         self._log_html_sched = None
@@ -942,12 +943,20 @@ class ControlUI:
         playlist_eff = now.get("playlist_effective")
         pl_txt = html.escape(str(playlist_eff)) if playlist_eff else "—"
 
+        bpm_eff = now.get("bpm_effective")
+        bpm_txt = "—"
+        if isinstance(bpm_eff, (int, float)):
+            bpm_txt = f"{float(bpm_eff):.2f}"
+
         predicted = now.get("predicted_next") if isinstance(now.get("predicted_next"), dict) else None
         pred_title = "—"
         pred_pl = "—"
+        pred_bpm = "—"
         if predicted:
             pred_title = html.escape(str(predicted.get("title_display") or predicted.get("title") or "—"))
             pred_pl = html.escape(str(predicted.get("playlist") or "—"))
+            if isinstance(predicted.get("bpm"), (int, float)):
+                pred_bpm = f"{float(predicted.get('bpm')):.2f}"
 
         ss = now.get("engine_stream_start") if isinstance(now.get("engine_stream_start"), dict) else None
         hint = ""
@@ -962,9 +971,11 @@ class ControlUI:
 
         return (
             '<div class="np-meta">'
-            f'  <div class="np-line"><span class="np-k">playlist:</span> <span class="np-v" data-copy="{pl_txt}">{pl_txt}</span></div>'
+            f'  <div class="np-line"><span class="np-k">playlist:</span> <span class="np-v" data-copy="{pl_txt}">{pl_txt}</span>'
+            f'    <span class="t-dim">|</span> <span class="np-k">tempo:</span> <span class="np-v" data-copy="{html.escape(bpm_txt)}">{html.escape(bpm_txt)}</span></div>'
             f'  <div class="np-line"><span class="np-k">next(pred):</span> <span class="np-v" data-copy="{pred_title}">{pred_title}</span>'
-            f'    <span class="t-dim">|</span> <span class="np-k">pl:</span> <span class="np-v" data-copy="{pred_pl}">{pred_pl}</span></div>'
+            f'    <span class="t-dim">|</span> <span class="np-k">pl:</span> <span class="np-v" data-copy="{pred_pl}">{pred_pl}</span>'
+            f'    <span class="t-dim">|</span> <span class="np-k">tempo:</span> <span class="np-v" data-copy="{html.escape(pred_bpm)}">{html.escape(pred_bpm)}</span></div>'
             f'  <div class="np-line">{hint}</div>'
             "</div>"
         )
@@ -984,7 +995,8 @@ class ControlUI:
         with ui.element("div").classes("az-card"):
             with ui.element("div").classes("az-card-h"):
                 ui.label("Upcoming")
-                ui.label("from scheduler NEXT log").classes("text-xs").style("opacity:.85;")
+                self._up_source_label = ui.label("tempo-selected runtime view").classes("text-xs")
+                self._up_source_label.style("opacity:.85;")
             with ui.element("div").classes("az-card-b"):
                 self._up_list_container = ui.element("div").classes("az-list")
 
@@ -1344,13 +1356,25 @@ class ControlUI:
     async def refresh_upcoming(self) -> None:
         if self._up_list_container is None:
             return
+        source_used = "runtime"
         try:
             up = await self._get_json("/panel/upcoming?n=10")
             items = up.get("upcoming") or []
             if not isinstance(items, list):
                 items = []
+            dbg = up.get("debug") if isinstance(up, dict) else None
+            if isinstance(dbg, dict):
+                source_used = str(dbg.get("used_source") or source_used)
         except Exception:
             items = []
+
+        if self._up_source_label:
+            if source_used == "engine":
+                self._up_source_label.set_text("from engine promoted tempo queue")
+            elif source_used == "scheduler":
+                self._up_source_label.set_text("from scheduler fallback")
+            else:
+                self._up_source_label.set_text("tempo-selected runtime view")
 
         self._up_list_container.clear()
         with self._up_list_container:
@@ -1363,16 +1387,23 @@ class ControlUI:
                 title = str(it.get("title_display") or it.get("title") or "—")
                 playlist = str(it.get("playlist") or "—")
                 ts = str(it.get("ts") or "")
+                bpm = it.get("bpm")
 
                 title_e = html.escape(title)
                 playlist_e = html.escape(playlist)
                 ts_e = html.escape(ts)
+                bpm_e = "—"
+                if isinstance(bpm, (int, float)):
+                    bpm_e = f"{float(bpm):.2f}"
+
                 tail = f' <span class="t-dim">[{ts_e}]</span>' if ts else ""
                 ui.html(
                     f'<div class="az-item"><span class="idx">{i}.</span> '
                     f'<span class="txt" data-copy="{title_e}">{title_e}</span> '
                     f'<span class="t-dim">|</span> '
-                    f'<span class="t-cyan t-bold" data-copy="{playlist_e}">{playlist_e}</span>'
+                    f'<span class="t-cyan t-bold" data-copy="{playlist_e}">{playlist_e}</span> '
+                    f'<span class="t-dim">| tempo:</span> '
+                    f'<span class="t-vio t-bold" data-copy="{html.escape(bpm_e)}">{html.escape(bpm_e)}</span>'
                     f'{tail}'
                     f"</div>"
                 )

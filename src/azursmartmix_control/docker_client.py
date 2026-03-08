@@ -49,14 +49,12 @@ class DockerClient:
 
     _RE_STREAM_START = re.compile(r"\bBUS\s+STREAM_START\b.*\bsrc=playbin\b", re.IGNORECASE)
 
-    _RE_TEMPO_SELECT_OK_META = re.compile(
-        r"""\btempo\(select(?::first)?\):\s*ok=True\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
+    _RE_TEMPO_SELECT_META = re.compile(
+        r"""\btempo\(select(?::first)?\):\s*ok=(?P<ok>True|False)\b.*?\ba=(?P<a>[0-9]+(?:\.[0-9]+)?)\b.*?\bb=(?P<b>[0-9]+(?:\.[0-9]+)?)\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
         re.IGNORECASE,
     )
-    _RE_TEMPO_SELECT_OK_REL = re.compile(
-        r"""\btempo\(select\):\s*ok=True\b.*?\brel=(?P<rel>[^\s]+)""",
-        re.IGNORECASE,
-    )
+    _RE_TEMPO_PACKCHAIN_ACCEPT = re.compile(r"""\btempo\(packchain\):\s*ACCEPT\b""", re.IGNORECASE)
+    _RE_TEMPO_PACKCHAIN_FAILOPEN = re.compile(r"""\btempo\(packchain\):\s*EXHAUST\s*->\s*FAIL-OPEN\s+accept_last\b""", re.IGNORECASE)
 
     def __init__(self) -> None:
         self.client = docker.from_env()
@@ -294,7 +292,14 @@ class DockerClient:
             return None
         return DockerClient.display_title(os.path.basename(s)) or None
 
-    def extract_tempo_selected_titles(self, engine_container: str, tail: int = 2500) -> Dict[str, Any]:
+    def _parse_tempo_meta(self, meta_raw: str) -> Optional[Dict[str, Any]]:
+        try:
+            meta = ast.literal_eval((meta_raw or "").strip())
+        except Exception:
+            return None
+        return meta if isinstance(meta, dict) else None
+
+    def extract_tempo_observations(self, engine_container: str, tail: int = 2500) -> Dict[str, Any]:
         txt = self.tail_logs(engine_container, tail=tail)
         if not txt or txt.startswith("[control]"):
             return {
@@ -302,37 +307,163 @@ class DockerClient:
                 "source": "engine_logs_tempo",
                 "engine_container": engine_container,
                 "error": txt.strip() if txt else "empty logs",
-                "titles": [],
+                "observations": [],
+                "promoted": [],
             }
 
-        titles: List[str] = []
+        observations: List[Dict[str, Any]] = []
+        promoted: List[Dict[str, Any]] = []
+        pending_candidate: Optional[Dict[str, Any]] = None
+
         for raw in txt.splitlines():
             line = self._strip_docker_prefix(raw)
 
-            m_meta = self._RE_TEMPO_SELECT_OK_META.search(line)
-            if m_meta:
-                try:
-                    meta = ast.literal_eval((m_meta.group("meta") or "").strip())
-                except Exception:
-                    meta = None
+            m_sel = self._RE_TEMPO_SELECT_META.search(line)
+            if m_sel:
+                meta = self._parse_tempo_meta(m_sel.group("meta") or "")
                 if isinstance(meta, dict):
-                    t = self._coerce_rel_title(str(meta.get("b_rel") or ""))
-                    if t:
-                        titles.append(t)
-                        continue
+                    a_title = self._coerce_rel_title(str(meta.get("a_rel") or ""))
+                    b_title = self._coerce_rel_title(str(meta.get("b_rel") or ""))
 
-            m_rel = self._RE_TEMPO_SELECT_OK_REL.search(line)
-            if m_rel:
-                t = self._coerce_rel_title(m_rel.group("rel") or "")
-                if t:
-                    titles.append(t)
+                    try:
+                        a_bpm = float(m_sel.group("a"))
+                    except Exception:
+                        a_bpm = None
+                    try:
+                        b_bpm = float(m_sel.group("b"))
+                    except Exception:
+                        b_bpm = None
+
+                    if a_title and a_bpm is not None:
+                        observations.append(
+                            {
+                                "title": a_title,
+                                "title_norm": self.normalize_title(a_title),
+                                "bpm": a_bpm,
+                                "role": "a",
+                                "ok": str(m_sel.group("ok")).lower() == "true",
+                            }
+                        )
+
+                    if b_title and b_bpm is not None:
+                        candidate = {
+                            "title": b_title,
+                            "title_norm": self.normalize_title(b_title),
+                            "bpm": b_bpm,
+                            "role": "b",
+                            "ok": str(m_sel.group("ok")).lower() == "true",
+                        }
+                        observations.append(candidate)
+                        pending_candidate = dict(candidate)
+                continue
+
+            if pending_candidate and self._RE_TEMPO_PACKCHAIN_ACCEPT.search(line):
+                promoted.append(
+                    {
+                        "title": pending_candidate.get("title"),
+                        "title_norm": pending_candidate.get("title_norm"),
+                        "bpm": pending_candidate.get("bpm"),
+                        "decision": "accept",
+                    }
+                )
+                pending_candidate = None
+                continue
+
+            if pending_candidate and self._RE_TEMPO_PACKCHAIN_FAILOPEN.search(line):
+                promoted.append(
+                    {
+                        "title": pending_candidate.get("title"),
+                        "title_norm": pending_candidate.get("title_norm"),
+                        "bpm": pending_candidate.get("bpm"),
+                        "decision": "fail_open_accept_last",
+                    }
+                )
+                pending_candidate = None
+                continue
 
         return {
             "ok": True,
             "source": "engine_logs_tempo",
             "engine_container": engine_container,
+            "observations": observations,
+            "promoted": promoted,
+            "observation_count": len(observations),
+            "promoted_count": len(promoted),
+        }
+
+    def infer_bpm_for_title_from_engine(self, engine_container: str, title: Optional[str], tail: int = 2500) -> Dict[str, Any]:
+        title_norm = self.normalize_title(title or "")
+        data = self.extract_tempo_observations(engine_container, tail=tail)
+        if not data.get("ok"):
+            return {
+                "ok": False,
+                "source": "engine_logs_tempo",
+                "title": title,
+                "title_norm": title_norm,
+                "bpm": None,
+                "error": data.get("error"),
+            }
+
+        if not title_norm:
+            return {
+                "ok": True,
+                "source": "engine_logs_tempo",
+                "title": title,
+                "title_norm": title_norm,
+                "bpm": None,
+                "match": None,
+            }
+
+        observations = data.get("observations") or []
+        for obs in reversed(observations):
+            if not isinstance(obs, dict):
+                continue
+            if (obs.get("title_norm") or "") == title_norm:
+                return {
+                    "ok": True,
+                    "source": "engine_logs_tempo",
+                    "title": title,
+                    "title_norm": title_norm,
+                    "bpm": obs.get("bpm"),
+                    "match": obs,
+                }
+
+        return {
+            "ok": True,
+            "source": "engine_logs_tempo",
+            "title": title,
+            "title_norm": title_norm,
+            "bpm": None,
+            "match": None,
+        }
+
+    def extract_tempo_selected_titles(self, engine_container: str, tail: int = 2500) -> Dict[str, Any]:
+        data = self.extract_tempo_observations(engine_container, tail=tail)
+        if not data.get("ok"):
+            return {
+                "ok": False,
+                "source": "engine_logs_tempo",
+                "engine_container": engine_container,
+                "error": data.get("error"),
+                "titles": [],
+            }
+
+        promoted = data.get("promoted") or []
+        titles: List[str] = []
+        for entry in promoted:
+            if not isinstance(entry, dict):
+                continue
+            title = str(entry.get("title") or "").strip()
+            if title:
+                titles.append(title)
+
+        return {
+            "ok": True,
+            "source": "engine_logs_tempo_promoted",
+            "engine_container": engine_container,
             "titles": titles,
             "count": len(titles),
+            "promoted": promoted,
         }
 
     # ----------------------- Engine preprocess (compat) -----------------------
@@ -353,7 +484,7 @@ class DockerClient:
 
         s = s.replace("_-_", " - ")
         s = s.replace("_", " ")
-        s = re.sub(r"\s+", " ", s).strip()
+        s = re.sub(r"\\s+", " ", s).strip()
 
         return s or None
 
@@ -375,72 +506,52 @@ class DockerClient:
         return {"ok": True, "source": "engine_logs", "engine_container": engine_container, "titles": titles, "count": len(titles)}
 
     def compute_upcoming_from_preprocess(self, engine_container: str, current_title: Optional[str], n: int = 10, tail: int = 2500) -> Dict[str, Any]:
-        tempo_data = self.extract_tempo_selected_titles(engine_container, tail=tail)
-        if tempo_data.get("ok"):
-            tempo_titles = [t for t in (tempo_data.get("titles") or []) if isinstance(t, str) and t.strip()]
-            if tempo_titles:
-                cur_norm = self.normalize_title(current_title or "")
-                start_idx = None
-
-                if cur_norm:
-                    for i in range(len(tempo_titles) - 1, -1, -1):
-                        if self.normalize_title(tempo_titles[i]) == cur_norm:
-                            start_idx = i + 1
-                            break
-
-                if start_idx is None:
-                    chunk = self._dedupe_keep_order(tempo_titles[-(n * 4) :])
-                    return {
-                        "ok": True,
-                        "source": "engine_logs_tempo_fallback_tail",
-                        "current_title_found": False,
-                        "current_title": current_title,
-                        "upcoming": chunk[:n],
-                    }
-
-                chunk2 = self._dedupe_keep_order(tempo_titles[start_idx:])
-                return {
-                    "ok": True,
-                    "source": "engine_logs_tempo_after_current",
-                    "current_title_found": True,
-                    "current_title": current_title,
-                    "upcoming": chunk2[:n],
-                }
-
-        data = self.extract_preprocess_titles(engine_container, tail=tail)
+        data = self.extract_tempo_observations(engine_container, tail=tail)
         if not data.get("ok"):
-            return {"ok": False, "error": data.get("error"), "upcoming": [], "source": "engine_logs"}
+            return {"ok": False, "error": data.get("error"), "upcoming": [], "source": "engine_logs_tempo"}
 
-        titles = [t for t in (data.get("titles") or []) if isinstance(t, str) and t.strip()]
-        if not titles:
-            return {"ok": False, "error": "no preprocess titles found", "upcoming": [], "source": "engine_logs"}
+        promoted = [x for x in (data.get("promoted") or []) if isinstance(x, dict)]
+        if not promoted:
+            return {"ok": False, "error": "no promoted tempo entries found", "upcoming": [], "source": "engine_logs_tempo"}
 
         cur_norm = self.normalize_title(current_title or "")
         start_idx = None
 
         if cur_norm:
-            for i in range(len(titles) - 1, -1, -1):
-                if self.normalize_title(titles[i]) == cur_norm:
+            for i in range(len(promoted) - 1, -1, -1):
+                if (promoted[i].get("title_norm") or "") == cur_norm:
                     start_idx = i + 1
                     break
 
-        if start_idx is None:
-            chunk = self._dedupe_keep_order(titles[-(n * 4) :])
-            return {
-                "ok": True,
-                "source": "engine_logs_preprocess_fallback_tail",
-                "current_title_found": False,
-                "current_title": current_title,
-                "upcoming": chunk[:n],
-            }
+        seq = promoted[start_idx:] if start_idx is not None else promoted[-(n * 4) :]
+        out: List[Dict[str, Any]] = []
+        seen: set[str] = set()
 
-        chunk2 = self._dedupe_keep_order(titles[start_idx:])
+        for entry in seq:
+            title = str(entry.get("title") or "").strip()
+            title_norm = self.normalize_title(title)
+            if not title_norm or title_norm in seen:
+                continue
+            seen.add(title_norm)
+            out.append(
+                {
+                    "title": title,
+                    "title_display": self.display_title(title),
+                    "title_norm": title_norm,
+                    "bpm": entry.get("bpm"),
+                    "decision": entry.get("decision"),
+                }
+            )
+            if len(out) >= n:
+                break
+
         return {
             "ok": True,
-            "source": "engine_logs_preprocess_after_current",
-            "current_title_found": True,
+            "source": "engine_logs_tempo_promoted_after_current" if start_idx is not None else "engine_logs_tempo_promoted_fallback_tail",
+            "current_title_found": start_idx is not None,
             "current_title": current_title,
-            "upcoming": chunk2[:n],
+            "upcoming": out,
+            "promoted": promoted,
         }
 
     # ----------------------- Scheduler NEXT -----------------------
