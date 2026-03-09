@@ -1065,7 +1065,7 @@ class ControlUI:
                 self._now_title = ui.label("—").classes("text-xl").style("font-weight: 950; margin: 2px 0 0 0;")
                 self._now_meta = ui.html(self._now_meta_html({}))
                 self._now_player = ui.html(self._player_html(stream_url))
-                ui.label("Sources: engine tempo runtime + Icecast(observed) + scheduler NEXT + engine STREAM_START hint").style("opacity:.7; margin-top: 10px;")
+                ui.label("Sources: engine playback runtime + Icecast(observed) + scheduler NEXT + engine STREAM_START hint").style("opacity:.7; margin-top: 10px;")
 
     def _now_meta_html(self, now: Dict[str, Any]) -> str:
         playlist_eff = now.get("playlist_effective")
@@ -1086,6 +1086,7 @@ class ControlUI:
         now_mode = html.escape(str(now.get("now_mode") or "—"))
         observed_title = html.escape(str(now.get("title_observed") or "—"))
         runtime_title = html.escape(str(now.get("title_runtime") or "—"))
+        runtime_stage = html.escape(str((tempo_runtime.get("playback_stage") if isinstance(tempo_runtime, dict) else None) or "—"))
 
         tempo_runtime = now.get("tempo_runtime") if isinstance(now.get("tempo_runtime"), dict) else {}
         decision_ok = bool(tempo_runtime.get("decision_ok")) if tempo_runtime else False
@@ -1120,7 +1121,8 @@ class ControlUI:
             f'  <div class="np-line"><span class="np-k">source(now):</span> <span class="np-v">{now_mode}</span>'
             f'    <span class="t-dim">|</span> <span class="np-k">tempo-state:</span> <span class="np-v">{html.escape(tempo_state)}</span></div>'
             f'  <div class="np-line"><span class="np-k">runtime:</span> <span class="np-v" data-copy="{runtime_title}">{runtime_title}</span>'
-            f'    <span class="t-dim">|</span> <span class="np-k">observed:</span> <span class="np-v" data-copy="{observed_title}">{observed_title}</span></div>'
+            f'    <span class="t-dim">|</span> <span class="np-k">stage:</span> <span class="np-v">{runtime_stage}</span></div>'
+            f'  <div class="np-line"><span class="np-k">observed:</span> <span class="np-v" data-copy="{observed_title}">{observed_title}</span></div>'
             f'  <div class="np-line">{hint}</div>'
             "</div>"
         )
@@ -1140,7 +1142,7 @@ class ControlUI:
         with ui.element("div").classes("az-card"):
             with ui.element("div").classes("az-card-h"):
                 ui.label("Upcoming")
-                ui.label("from scheduler NEXT log").classes("text-xs").style("opacity:.85;")
+                ui.label("engine runtime / scheduler NEXT").classes("text-xs").style("opacity:.85;")
             with ui.element("div").classes("az-card-b"):
                 self._up_list_container = ui.element("div").classes("az-list")
 
