@@ -426,6 +426,87 @@ class DockerClient:
             "count": len(titles),
         }
 
+    def extract_tempo_runtime_state(self, engine_container: str, tail: int = 2500) -> Dict[str, Any]:
+        txt = self.tail_logs(engine_container, tail=tail)
+        if not txt or txt.startswith("[control]"):
+            return {
+                "ok": False,
+                "source": "engine_logs_tempo_runtime",
+                "engine_container": engine_container,
+                "error": txt.strip() if txt else "empty logs",
+                "current_title": None,
+                "next_title": None,
+                "current_bpm": None,
+                "next_bpm": None,
+            }
+
+        last_state: Optional[Dict[str, Any]] = None
+        fail_open = False
+
+        for raw in txt.splitlines():
+            line = self._strip_docker_prefix(raw)
+
+            m_any = self._RE_TEMPO_SELECT_ANY_META.search(line)
+            if m_any:
+                try:
+                    meta = ast.literal_eval((m_any.group("meta") or "").strip())
+                except Exception:
+                    meta = None
+
+                if isinstance(meta, dict):
+                    current_title = self._coerce_rel_title(str(meta.get("a_rel") or ""))
+                    next_title = self._coerce_rel_title(str(meta.get("b_rel") or ""))
+
+                    def bpm_or_none(v: Any) -> Optional[float]:
+                        try:
+                            x = float(v)
+                        except Exception:
+                            return None
+                        return round(x, 2) if x >= 0 else None
+
+                    last_state = {
+                        "ok": True,
+                        "source": "engine_logs_tempo_runtime",
+                        "engine_container": engine_container,
+                        "decision_ok": str(m_any.group("ok") or "").lower() == "true",
+                        "fail_open": False,
+                        "current_title": current_title,
+                        "next_title": next_title,
+                        "current_bpm": bpm_or_none(meta.get("a")),
+                        "next_bpm": bpm_or_none(meta.get("b")),
+                        "a_src": meta.get("a_src"),
+                        "b_src": meta.get("b_src"),
+                        "a_fx": meta.get("a_fx"),
+                        "b_fx": meta.get("b_fx"),
+                        "a_tid": meta.get("a_tid"),
+                        "b_tid": meta.get("b_tid"),
+                        "raw_meta": meta,
+                    }
+                    continue
+
+            if self._RE_TEMPO_EXHAUST_FAIL_OPEN.search(line):
+                fail_open = True
+                if last_state:
+                    last_state["fail_open"] = True
+                    last_state["decision_ok"] = True
+
+        if last_state:
+            if fail_open:
+                last_state["fail_open"] = True
+                last_state["decision_ok"] = True
+            return last_state
+
+        return {
+            "ok": False,
+            "source": "engine_logs_tempo_runtime",
+            "engine_container": engine_container,
+            "error": "no tempo runtime state found",
+            "current_title": None,
+            "next_title": None,
+            "current_bpm": None,
+            "next_bpm": None,
+        }
+
     # ----------------------- Engine preprocess (compat) -----------------------
 
     def _clean_preprocess_title(self, rest: str) -> Optional[str]:
