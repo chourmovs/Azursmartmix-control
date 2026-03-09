@@ -7,6 +7,7 @@ import re
 import shlex
 import subprocess
 import time
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -55,16 +56,24 @@ class DockerClient:
         r"""\btempo\(select(?::first)?\):\s*ok=True\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
         re.IGNORECASE,
     )
-    _RE_TEMPO_SELECT_ANY_META = re.compile(
-        r"""\btempo\(select(?::first)?\):\s*ok=(?P<ok>True|False)\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
-        re.IGNORECASE,
-    )
     _RE_TEMPO_SELECT_OK_REL = re.compile(
         r"""\btempo\(select\):\s*ok=True\b.*?\brel=(?P<rel>[^\s]+)""",
         re.IGNORECASE,
     )
+    _RE_TEMPO_SELECT_ANY_META = re.compile(
+        r"""\btempo\(select(?::first)?\):\s*ok=(?P<ok>True|False)\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
+        re.IGNORECASE,
+    )
     _RE_TEMPO_EXHAUST_FAIL_OPEN = re.compile(
         r"""\btempo\(packchain\):\s*EXHAUST\s*->\s*FAIL-OPEN\b""",
+        re.IGNORECASE,
+    )
+    _RE_AFT_SET_URI = re.compile(
+        r"""\bAFT#(?P<aft>\d+)\s+set_uri\s+ok\s+uri=(?P<uri>\S+)""",
+        re.IGNORECASE,
+    )
+    _RE_PACK_URI_STAGE = re.compile(
+        r"""(?:^|/)pack_(?P<packid>[a-f0-9]+)_(?P<stage>a|b|bridge)\.wav$""",
         re.IGNORECASE,
     )
 
@@ -393,6 +402,61 @@ class DockerClient:
             return None
         return DockerClient.display_title(os.path.basename(s)) or None
 
+    @staticmethod
+    def _bpm_or_none(v: Any) -> Optional[float]:
+        try:
+            x = float(v)
+        except Exception:
+            return None
+        return round(x, 2) if x >= 0 else None
+
+    @staticmethod
+    def _norm_or_empty(v: Optional[str]) -> str:
+        return DockerClient.normalize_title(v or "")
+
+    @staticmethod
+    def _playback_title_from_uri(uri: str) -> Optional[str]:
+        s = (uri or "").strip()
+        if not s:
+            return None
+        s = re.sub(r"\|.*$", "", s).strip()
+        if s.startswith("file://"):
+            s = s[7:]
+        s = urllib.parse.unquote(s)
+        name = os.path.basename(s)
+        if not name:
+            return None
+        if name.lower() == "azurmixd_silence.mp3":
+            return None
+        return DockerClient.display_title(name) or None
+
+    @classmethod
+    def _playback_stage_from_uri(cls, uri: str) -> Dict[str, Optional[str]]:
+        raw = (uri or "").strip()
+        raw = re.sub(r"\|.*$", "", raw).strip()
+        path = raw[7:] if raw.startswith("file://") else raw
+        path = urllib.parse.unquote(path)
+
+        m = cls._RE_PACK_URI_STAGE.search(path)
+        if m:
+            seg = str(m.group("stage") or "").lower()
+            return {
+                "playback_uri": raw or None,
+                "playback_path": path or None,
+                "playback_stage": f"pack_{seg}",
+                "pack_id": str(m.group("packid") or "") or None,
+                "playback_title": None,
+            }
+
+        title = cls._playback_title_from_uri(raw)
+        return {
+            "playback_uri": raw or None,
+            "playback_path": path or None,
+            "playback_stage": "direct" if title else ("silence" if "azurmixd_silence.mp3" in path else "unknown"),
+            "pack_id": None,
+            "playback_title": title,
+        }
+
     def extract_tempo_selected_titles(self, engine_container: str, tail: int = 2500) -> Dict[str, Any]:
         txt = self.tail_logs(engine_container, tail=tail)
         if not txt or txt.startswith("[control]"):
@@ -446,12 +510,17 @@ class DockerClient:
                 "next_title": None,
                 "current_bpm": None,
                 "next_bpm": None,
+                "playback_stage": None,
+                "playback_uri": None,
+                "playback_title": None,
             }
 
         last_state: Optional[Dict[str, Any]] = None
-        fail_open = False
+        last_state_idx = -1
+        last_playback: Optional[Dict[str, Any]] = None
+        last_playback_idx = -1
 
-        for raw in txt.splitlines():
+        for idx, raw in enumerate(txt.splitlines()):
             line = self._strip_docker_prefix(raw)
 
             m_any = self._RE_TEMPO_SELECT_ANY_META.search(line)
@@ -462,26 +531,16 @@ class DockerClient:
                     meta = None
 
                 if isinstance(meta, dict):
-                    current_title = self._coerce_rel_title(str(meta.get("a_rel") or ""))
-                    next_title = self._coerce_rel_title(str(meta.get("b_rel") or ""))
-
-                    def bpm_or_none(v: Any) -> Optional[float]:
-                        try:
-                            x = float(v)
-                        except Exception:
-                            return None
-                        return round(x, 2) if x >= 0 else None
-
                     last_state = {
                         "ok": True,
                         "source": "engine_logs_tempo_runtime",
                         "engine_container": engine_container,
                         "decision_ok": str(m_any.group("ok") or "").lower() == "true",
                         "fail_open": False,
-                        "current_title": current_title,
-                        "next_title": next_title,
-                        "current_bpm": bpm_or_none(meta.get("a")),
-                        "next_bpm": bpm_or_none(meta.get("b")),
+                        "current_title": self._coerce_rel_title(str(meta.get("a_rel") or "")),
+                        "next_title": self._coerce_rel_title(str(meta.get("b_rel") or "")),
+                        "current_bpm": self._bpm_or_none(meta.get("a")),
+                        "next_bpm": self._bpm_or_none(meta.get("b")),
                         "a_src": meta.get("a_src"),
                         "b_src": meta.get("b_src"),
                         "a_fx": meta.get("a_fx"),
@@ -490,30 +549,106 @@ class DockerClient:
                         "b_tid": meta.get("b_tid"),
                         "raw_meta": meta,
                     }
+                    last_state_idx = idx
                     continue
 
             if self._RE_TEMPO_EXHAUST_FAIL_OPEN.search(line):
-                fail_open = True
                 if last_state:
                     last_state["fail_open"] = True
                     last_state["decision_ok"] = True
+                continue
 
-        if last_state:
-            if fail_open:
-                last_state["fail_open"] = True
-                last_state["decision_ok"] = True
-            return last_state
+            m_aft = self._RE_AFT_SET_URI.search(line)
+            if m_aft:
+                last_playback = self._playback_stage_from_uri(m_aft.group("uri") or "")
+                last_playback["aft_index"] = str(m_aft.group("aft") or "")
+                last_playback_idx = idx
 
-        return {
-            "ok": False,
+        if not last_state and not last_playback:
+            return {
+                "ok": False,
+                "source": "engine_logs_tempo_runtime",
+                "engine_container": engine_container,
+                "error": "no tempo runtime state found",
+                "current_title": None,
+                "next_title": None,
+                "current_bpm": None,
+                "next_bpm": None,
+                "playback_stage": None,
+                "playback_uri": None,
+                "playback_title": None,
+            }
+
+        result: Dict[str, Any] = {
+            "ok": True,
             "source": "engine_logs_tempo_runtime",
             "engine_container": engine_container,
-            "error": "no tempo runtime state found",
-            "current_title": None,
-            "next_title": None,
-            "current_bpm": None,
-            "next_bpm": None,
+            "decision_ok": bool((last_state or {}).get("decision_ok")),
+            "fail_open": bool((last_state or {}).get("fail_open")),
+            "current_title": (last_state or {}).get("current_title"),
+            "next_title": (last_state or {}).get("next_title"),
+            "current_bpm": (last_state or {}).get("current_bpm"),
+            "next_bpm": (last_state or {}).get("next_bpm"),
+            "a_src": (last_state or {}).get("a_src"),
+            "b_src": (last_state or {}).get("b_src"),
+            "a_fx": (last_state or {}).get("a_fx"),
+            "b_fx": (last_state or {}).get("b_fx"),
+            "a_tid": (last_state or {}).get("a_tid"),
+            "b_tid": (last_state or {}).get("b_tid"),
+            "raw_meta": (last_state or {}).get("raw_meta"),
+            "playback_stage": (last_playback or {}).get("playback_stage"),
+            "playback_uri": (last_playback or {}).get("playback_uri"),
+            "playback_title": (last_playback or {}).get("playback_title"),
+            "playback_path": (last_playback or {}).get("playback_path"),
+            "pack_id": (last_playback or {}).get("pack_id"),
+            "aft_index": (last_playback or {}).get("aft_index"),
         }
+
+        stage = result.get("playback_stage")
+        playback_title = result.get("playback_title")
+        state_after_playback = last_state_idx > last_playback_idx
+        current_norm = self._norm_or_empty(result.get("current_title"))
+        next_norm = self._norm_or_empty(result.get("next_title"))
+        playback_norm = self._norm_or_empty(playback_title)
+
+        if stage == "pack_b":
+            if state_after_playback:
+                return result
+            if result.get("next_title"):
+                result["current_title"] = result.get("next_title")
+                result["current_bpm"] = result.get("next_bpm")
+            result["next_title"] = None
+            result["next_bpm"] = None
+            return result
+
+        if stage in {"pack_a", "pack_bridge"}:
+            return result
+
+        if stage == "direct" and playback_title:
+            result["current_title"] = playback_title
+
+            if playback_norm and current_norm == playback_norm:
+                return result
+
+            if playback_norm and next_norm == playback_norm:
+                result["current_bpm"] = result.get("next_bpm")
+                result["next_title"] = None
+                result["next_bpm"] = None
+                return result
+
+            if not state_after_playback:
+                result["current_bpm"] = None
+                result["next_title"] = None
+                result["next_bpm"] = None
+                return result
+
+            if playback_norm and current_norm != playback_norm:
+                result["current_bpm"] = None
+                result["next_title"] = None
+                result["next_bpm"] = None
+            return result
+
+        return result
 
     # ----------------------- Engine preprocess (compat) -----------------------
 

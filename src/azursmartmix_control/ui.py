@@ -1065,7 +1065,7 @@ class ControlUI:
                 self._now_title = ui.label("—").classes("text-xl").style("font-weight: 950; margin: 2px 0 0 0;")
                 self._now_meta = ui.html(self._now_meta_html({}))
                 self._now_player = ui.html(self._player_html(stream_url))
-                ui.label("Sources: engine tempo runtime + Icecast(observed) + scheduler NEXT + engine STREAM_START hint").style("opacity:.7; margin-top: 10px;")
+                ui.label("Sources: Icecast(observed) + scheduler NEXT + engine STREAM_START hint").style("opacity:.7; margin-top: 10px;")
 
     def _now_meta_html(self, now: Dict[str, Any]) -> str:
         playlist_eff = now.get("playlist_effective")
@@ -1077,27 +1077,6 @@ class ControlUI:
         if predicted:
             pred_title = html.escape(str(predicted.get("title_display") or predicted.get("title") or "—"))
             pred_pl = html.escape(str(predicted.get("playlist") or "—"))
-
-        current_bpm = now.get("current_bpm")
-        next_bpm = now.get("next_bpm")
-        cur_bpm_txt = f"{float(current_bpm):.2f}" if isinstance(current_bpm, (int, float)) else "—"
-        next_bpm_txt = f"{float(next_bpm):.2f}" if isinstance(next_bpm, (int, float)) else "—"
-
-        now_mode = html.escape(str(now.get("now_mode") or "—"))
-        observed_title = html.escape(str(now.get("title_observed") or "—"))
-        runtime_title = html.escape(str(now.get("title_runtime") or "—"))
-
-        tempo_runtime = now.get("tempo_runtime") if isinstance(now.get("tempo_runtime"), dict) else {}
-        decision_ok = bool(tempo_runtime.get("decision_ok")) if tempo_runtime else False
-        fail_open = bool(tempo_runtime.get("fail_open")) if tempo_runtime else False
-        tempo_state = "—"
-        if tempo_runtime:
-            if fail_open:
-                tempo_state = "fail-open"
-            elif decision_ok:
-                tempo_state = "accepted"
-            elif tempo_runtime.get("ok"):
-                tempo_state = "candidate"
 
         ss = now.get("engine_stream_start") if isinstance(now.get("engine_stream_start"), dict) else None
         hint = ""
@@ -1113,14 +1092,8 @@ class ControlUI:
         return (
             '<div class="np-meta">'
             f'  <div class="np-line"><span class="np-k">playlist:</span> <span class="np-v" data-copy="{pl_txt}">{pl_txt}</span></div>'
-            f'  <div class="np-line"><span class="np-k">tempo(now):</span> <span class="np-v" data-copy="{cur_bpm_txt}">{cur_bpm_txt}</span>'
-            f'    <span class="t-dim">|</span> <span class="np-k">tempo(next):</span> <span class="np-v" data-copy="{next_bpm_txt}">{next_bpm_txt}</span></div>'
             f'  <div class="np-line"><span class="np-k">next(pred):</span> <span class="np-v" data-copy="{pred_title}">{pred_title}</span>'
             f'    <span class="t-dim">|</span> <span class="np-k">pl:</span> <span class="np-v" data-copy="{pred_pl}">{pred_pl}</span></div>'
-            f'  <div class="np-line"><span class="np-k">source(now):</span> <span class="np-v">{now_mode}</span>'
-            f'    <span class="t-dim">|</span> <span class="np-k">tempo-state:</span> <span class="np-v">{html.escape(tempo_state)}</span></div>'
-            f'  <div class="np-line"><span class="np-k">runtime:</span> <span class="np-v" data-copy="{runtime_title}">{runtime_title}</span>'
-            f'    <span class="t-dim">|</span> <span class="np-k">observed:</span> <span class="np-v" data-copy="{observed_title}">{observed_title}</span></div>'
             f'  <div class="np-line">{hint}</div>'
             "</div>"
         )
