@@ -55,8 +55,16 @@ class DockerClient:
         r"""\btempo\(select(?::first)?\):\s*ok=True\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
         re.IGNORECASE,
     )
+    _RE_TEMPO_SELECT_ANY_META = re.compile(
+        r"""\btempo\(select(?::first)?\):\s*ok=(?P<ok>True|False)\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
+        re.IGNORECASE,
+    )
     _RE_TEMPO_SELECT_OK_REL = re.compile(
         r"""\btempo\(select\):\s*ok=True\b.*?\brel=(?P<rel>[^\s]+)""",
+        re.IGNORECASE,
+    )
+    _RE_TEMPO_EXHAUST_FAIL_OPEN = re.compile(
+        r"""\btempo\(packchain\):\s*EXHAUST\s*->\s*FAIL-OPEN\b""",
         re.IGNORECASE,
     )
 
