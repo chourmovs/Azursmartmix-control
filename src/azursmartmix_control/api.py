@@ -331,7 +331,6 @@ def create_api(settings: Settings) -> FastAPI:
         )
         runtime_current_title = tempo_runtime.get("current_title") if isinstance(tempo_runtime, dict) else None
         runtime_next_title = tempo_runtime.get("next_title") if isinstance(tempo_runtime, dict) else None
-        runtime_stage = tempo_runtime.get("playback_stage") if isinstance(tempo_runtime, dict) else None
 
         current_hint = runtime_current_title or title_observed
         upcoming_sched = docker_client.compute_upcoming_from_scheduler_next(
@@ -434,8 +433,6 @@ def create_api(settings: Settings) -> FastAPI:
                 "upcoming_count_raw": len(eff.get("raw_upcoming") or []),
                 "promoted": bool(effective_now),
                 "runtime_next_title": runtime_next_title,
-                "runtime_stage": runtime_stage,
-                "runtime_uri": tempo_runtime.get("playback_uri") if isinstance(tempo_runtime, dict) else None,
             },
         }
 

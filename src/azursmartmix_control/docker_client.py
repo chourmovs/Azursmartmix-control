@@ -55,8 +55,16 @@ class DockerClient:
         r"""\btempo\(select(?::first)?\):\s*ok=True\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
         re.IGNORECASE,
     )
+    _RE_TEMPO_SELECT_ANY_META = re.compile(
+        r"""\btempo\(select(?::first)?\):\s*ok=(?P<ok>True|False)\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
+        re.IGNORECASE,
+    )
     _RE_TEMPO_SELECT_OK_REL = re.compile(
         r"""\btempo\(select\):\s*ok=True\b.*?\brel=(?P<rel>[^\s]+)""",
+        re.IGNORECASE,
+    )
+    _RE_TEMPO_EXHAUST_FAIL_OPEN = re.compile(
+        r"""\btempo\(packchain\):\s*EXHAUST\s*->\s*FAIL-OPEN\b""",
         re.IGNORECASE,
     )
 
@@ -438,20 +446,10 @@ class DockerClient:
                 "next_title": None,
                 "current_bpm": None,
                 "next_bpm": None,
-                "playback_stage": None,
-                "playback_uri": None,
             }
-
-        def bpm_or_none(v: Any) -> Optional[float]:
-            try:
-                x = float(v)
-            except Exception:
-                return None
-            return round(x, 2) if x >= 0 else None
 
         last_state: Optional[Dict[str, Any]] = None
         fail_open = False
-        last_uri: Optional[str] = None
 
         for raw in txt.splitlines():
             line = self._strip_docker_prefix(raw)
@@ -464,22 +462,26 @@ class DockerClient:
                     meta = None
 
                 if isinstance(meta, dict):
-                    tempo_current_title = self._coerce_rel_title(str(meta.get("a_rel") or ""))
-                    tempo_next_title = self._coerce_rel_title(str(meta.get("b_rel") or ""))
+                    current_title = self._coerce_rel_title(str(meta.get("a_rel") or ""))
+                    next_title = self._coerce_rel_title(str(meta.get("b_rel") or ""))
+
+                    def bpm_or_none(v: Any) -> Optional[float]:
+                        try:
+                            x = float(v)
+                        except Exception:
+                            return None
+                        return round(x, 2) if x >= 0 else None
+
                     last_state = {
                         "ok": True,
                         "source": "engine_logs_tempo_runtime",
                         "engine_container": engine_container,
                         "decision_ok": str(m_any.group("ok") or "").lower() == "true",
                         "fail_open": False,
-                        "current_title": tempo_current_title,
-                        "next_title": tempo_next_title,
+                        "current_title": current_title,
+                        "next_title": next_title,
                         "current_bpm": bpm_or_none(meta.get("a")),
                         "next_bpm": bpm_or_none(meta.get("b")),
-                        "tempo_current_title": tempo_current_title,
-                        "tempo_next_title": tempo_next_title,
-                        "tempo_current_bpm": bpm_or_none(meta.get("a")),
-                        "tempo_next_bpm": bpm_or_none(meta.get("b")),
                         "a_src": meta.get("a_src"),
                         "b_src": meta.get("b_src"),
                         "a_fx": meta.get("a_fx"),
@@ -489,11 +491,6 @@ class DockerClient:
                         "raw_meta": meta,
                     }
                     continue
-
-            m_uri = self._RE_AFT_SET_URI.search(line)
-            if m_uri:
-                last_uri = (m_uri.group("uri") or "").strip() or None
-                continue
 
             if self._RE_TEMPO_EXHAUST_FAIL_OPEN.search(line):
                 fail_open = True
@@ -505,53 +502,6 @@ class DockerClient:
             if fail_open:
                 last_state["fail_open"] = True
                 last_state["decision_ok"] = True
-
-            playback_stage = "tempo"
-            playback_title = last_state.get("tempo_current_title")
-            next_title = last_state.get("tempo_next_title")
-            current_bpm = last_state.get("tempo_current_bpm")
-            next_bpm = last_state.get("tempo_next_bpm")
-
-            uri = (last_uri or "").strip()
-            base = os.path.basename(uri)
-            base_lower = base.lower()
-
-            if uri:
-                if "azurmixd_silence" in base_lower:
-                    playback_stage = "silence"
-                elif base_lower.startswith("pack_") and base_lower.endswith("_a.wav"):
-                    playback_stage = "pack_a"
-                    playback_title = last_state.get("tempo_current_title")
-                    next_title = last_state.get("tempo_next_title")
-                    current_bpm = last_state.get("tempo_current_bpm")
-                    next_bpm = last_state.get("tempo_next_bpm")
-                elif base_lower.startswith("pack_") and base_lower.endswith("_bridge.wav"):
-                    playback_stage = "pack_bridge"
-                    playback_title = last_state.get("tempo_current_title")
-                    next_title = last_state.get("tempo_next_title")
-                    current_bpm = last_state.get("tempo_current_bpm")
-                    next_bpm = last_state.get("tempo_next_bpm")
-                elif base_lower.startswith("pack_") and base_lower.endswith("_b.wav"):
-                    playback_stage = "pack_b"
-                    playback_title = last_state.get("tempo_next_title")
-                    next_title = None
-                    current_bpm = last_state.get("tempo_next_bpm")
-                    next_bpm = None
-                else:
-                    direct_title = self._coerce_rel_title(uri)
-                    if direct_title:
-                        playback_stage = "direct"
-                        playback_title = direct_title
-                        next_title = None
-                        current_bpm = None
-                        next_bpm = None
-
-            last_state["playback_stage"] = playback_stage
-            last_state["playback_uri"] = uri or None
-            last_state["current_title"] = playback_title
-            last_state["next_title"] = next_title
-            last_state["current_bpm"] = current_bpm
-            last_state["next_bpm"] = next_bpm
             return last_state
 
         return {
@@ -563,8 +513,6 @@ class DockerClient:
             "next_title": None,
             "current_bpm": None,
             "next_bpm": None,
-            "playback_stage": None,
-            "playback_uri": last_uri,
         }
 
     # ----------------------- Engine preprocess (compat) -----------------------
