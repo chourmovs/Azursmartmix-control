@@ -90,6 +90,14 @@ class ComposeEnvSaveRequest(BaseModel):
     env_format_prefer: str = Field(default="dict", description="dict|list (legacy, ignored for env_file)")
 
 
+def _display_title_or_none(value: Any) -> Optional[str]:
+    s = str(value or "").strip()
+    if not s:
+        return None
+    s = DockerClient.display_title(s)
+    return s or None
+
+
 def create_api(settings: Settings) -> FastAPI:
     app = FastAPI(title="AzurSmartMix Control API", version="0.1.0")
 
@@ -321,16 +329,49 @@ def create_api(settings: Settings) -> FastAPI:
     @app.get("/panel/now")
     async def panel_now() -> Dict[str, Any]:
         ic = await ice.now_playing()
-        title_observed = None
+        icecast_title = None
         if isinstance(ic, dict) and ic.get("ok"):
-            title_observed = ic.get("title") or (ic.get("raw") or {}).get("title")
+            icecast_title = _display_title_or_none(ic.get("title") or (ic.get("raw") or {}).get("title"))
 
+        tempo_runtime = docker_client.extract_tempo_runtime_state(
+            engine_container=settings.engine_container,
+            tail=2500,
+        )
+        runtime_title = None
+        if isinstance(tempo_runtime, dict) and tempo_runtime.get("ok"):
+            runtime_title = _display_title_or_none(tempo_runtime.get("current_title"))
+
+        title_effective = icecast_title or runtime_title
+        now_source = "icecast_metadata" if icecast_title else ("engine_tempo_runtime" if runtime_title else None)
+
+        upcoming_tempo = docker_client.compute_upcoming_from_tempo_accepts(
+            engine_container=settings.engine_container,
+            current_title=title_effective,
+            n=6,
+            tail=3000,
+        )
         upcoming_sched = docker_client.compute_upcoming_from_scheduler_next(
             scheduler_container=settings.scheduler_container,
-            current_title=title_observed,
+            current_title=title_effective,
             n=12,
             tail=3000,
         )
+
+        pl_observed = docker_client.infer_playlist_for_title_from_scheduler(
+            scheduler_container=settings.scheduler_container,
+            current_title=title_effective,
+            tail=3000,
+        )
+        playlist_effective = pl_observed.get("playlist") if isinstance(pl_observed, dict) else None
+
+        predicted_next = None
+        tempo_items = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else None
+        if isinstance(tempo_items, list) and tempo_items:
+            predicted_next = tempo_items[0]
+        else:
+            sched_items = upcoming_sched.get("upcoming") if isinstance(upcoming_sched, dict) else None
+            if isinstance(sched_items, list) and sched_items:
+                predicted_next = sched_items[0]
 
         ss = docker_client.last_engine_stream_start(
             engine_container=settings.engine_container,
@@ -338,62 +379,54 @@ def create_api(settings: Settings) -> FastAPI:
             recent_window_s=12,
         )
 
-        pl_observed = docker_client.infer_playlist_for_title_from_scheduler(
-            scheduler_container=settings.scheduler_container,
-            current_title=title_observed,
-            tail=3000,
-        )
-        playlist_observed = pl_observed.get("playlist") if isinstance(pl_observed, dict) else None
-
-        eff = _compute_effective_now_and_upcoming(title_observed, upcoming_sched)
-        effective_now = eff.get("effective_now")
-
-        now_mode = "observed"
-        title_effective = title_observed
-        playlist_effective = playlist_observed
-
-        predicted_next = None
-        if effective_now and isinstance(effective_now, dict):
-            title_effective = effective_now.get("title_display") or docker_client.display_title(
-                str(effective_now.get("title") or "")
-            )
-            playlist_effective = effective_now.get("playlist") or playlist_effective
-            now_mode = "promoted_from_upcoming"
-
-            effective_upcoming = eff.get("effective_upcoming") or []
-            if isinstance(effective_upcoming, list) and effective_upcoming:
-                predicted_next = effective_upcoming[0]
-        else:
-            raw_up = eff.get("raw_upcoming") or []
-            if isinstance(raw_up, list) and raw_up:
-                predicted_next = raw_up[0]
-
         return {
             "ok": bool(title_effective),
             "mount": settings.icecast_mount,
-            "source": "icecast(observed)+scheduler(NEXT)+engine(hint)",
-            "now_mode": now_mode,
+            "source": "icecast(metadata)+engine_tempo(select)+scheduler(NEXT)+engine(STREAM_START)",
+            "now_source": now_source,
             "title_effective": title_effective,
             "playlist_effective": playlist_effective,
-            "title_observed": title_observed,
-            "playlist_observed": playlist_observed,
+            "title_observed": icecast_title,
+            "title_runtime": runtime_title,
+            "playlist_observed": playlist_effective,
             "scheduler_match_observed": pl_observed.get("match") if isinstance(pl_observed, dict) else None,
             "engine_stream_start": ss,
+            "tempo_runtime": tempo_runtime,
             "predicted_next": predicted_next,
             "debug": {
-                "observed_norm": eff.get("observed_norm"),
-                "upcoming_primary_source": upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None,
-                "upcoming_count_raw": len(eff.get("raw_upcoming") or []),
-                "promoted": bool(effective_now),
+                "upcoming_primary_source": upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None,
+                "upcoming_secondary_source": upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None,
+                "tempo_upcoming_count": len(tempo_items or []) if isinstance(tempo_items, list) else 0,
+                "scheduler_upcoming_count": len((upcoming_sched.get("upcoming") or [])) if isinstance(upcoming_sched, dict) else 0,
             },
         }
 
     @app.get("/panel/upcoming")
     async def panel_upcoming(n: int = Query(10, ge=1, le=30)) -> Dict[str, Any]:
         ic = await ice.now_playing()
-        current_title = None
+        icecast_title = None
         if isinstance(ic, dict) and ic.get("ok"):
-            current_title = ic.get("title")
+            icecast_title = _display_title_or_none(ic.get("title") or (ic.get("raw") or {}).get("title"))
+
+        tempo_runtime = docker_client.extract_tempo_runtime_state(
+            engine_container=settings.engine_container,
+            tail=2500,
+        )
+        runtime_title = None
+        if isinstance(tempo_runtime, dict) and tempo_runtime.get("ok"):
+            runtime_title = _display_title_or_none(tempo_runtime.get("current_title"))
+
+        current_title = icecast_title or runtime_title
+
+        upcoming_tempo = docker_client.compute_upcoming_from_tempo_accepts(
+            engine_container=settings.engine_container,
+            current_title=current_title,
+            n=max(12, n + 2),
+            tail=3000,
+        )
+        tempo_items = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else None
+        if not isinstance(tempo_items, list):
+            tempo_items = []
 
         upcoming_sched = docker_client.compute_upcoming_from_scheduler_next(
             scheduler_container=settings.scheduler_container,
@@ -401,45 +434,27 @@ def create_api(settings: Settings) -> FastAPI:
             n=max(12, n + 2),
             tail=3000,
         )
+        sched_items = upcoming_sched.get("upcoming") if isinstance(upcoming_sched, dict) else None
+        if not isinstance(sched_items, list):
+            sched_items = []
 
-        eff = _compute_effective_now_and_upcoming(current_title, upcoming_sched)
-        effective_upcoming = eff.get("effective_upcoming") or []
-        if not isinstance(effective_upcoming, list):
-            effective_upcoming = []
-        effective_upcoming = effective_upcoming[:n]
-
-        upcoming_engine = docker_client.compute_upcoming_from_preprocess(
-            engine_container=settings.engine_container,
-            current_title=current_title,
-            n=n,
-            tail=2500,
-        )
-        upcoming_titles: List[str] = []
-        if isinstance(upcoming_engine, dict) and upcoming_engine.get("ok"):
-            u2 = upcoming_engine.get("upcoming") or []
-            if isinstance(u2, list):
-                upcoming_titles = [str(x) for x in u2]
-
-        engine_upcoming = _engine_titles_to_upcoming_entries(upcoming_titles, upcoming_sched, n)
-        using_engine = bool(engine_upcoming)
+        using_tempo = bool(tempo_items)
+        chosen = (tempo_items if using_tempo else sched_items)[:n]
 
         return {
             "ok": True,
             "current_title_observed": current_title,
             "source": {
-                "primary": upcoming_engine.get("source") if using_engine and isinstance(upcoming_engine, dict) else (upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None),
-                "secondary": upcoming_sched.get("source") if using_engine and isinstance(upcoming_sched, dict) else (upcoming_engine.get("source") if isinstance(upcoming_engine, dict) else None),
+                "primary": upcoming_tempo.get("source") if using_tempo and isinstance(upcoming_tempo, dict) else (upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None),
+                "secondary": upcoming_sched.get("source") if using_tempo and isinstance(upcoming_sched, dict) else None,
             },
-            "upcoming": (engine_upcoming if using_engine else effective_upcoming)[:n],
-            "upcoming_titles": upcoming_titles[:n],
+            "upcoming": chosen,
             "debug": {
-                "observed_norm": eff.get("observed_norm"),
-                "promoted_now": eff.get("effective_now"),
-                "raw_upcoming_head": (eff.get("raw_upcoming") or [])[:3],
+                "title_source": "icecast_metadata" if icecast_title else ("engine_tempo_runtime" if runtime_title else None),
+                "tempo_runtime": tempo_runtime,
+                "tempo_accept": upcoming_tempo,
                 "scheduler": upcoming_sched,
-                "engine_preprocess": upcoming_engine,
-                "engine_upcoming": engine_upcoming[:n],
-                "used_source": "engine" if using_engine else "scheduler",
+                "used_source": "tempo_accept" if using_tempo else "scheduler",
             },
         }
 
