@@ -10,7 +10,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import docker
 from docker.errors import DockerException, NotFound
@@ -36,6 +36,19 @@ class NextEntry:
     playlist: str
 
 
+@dataclass(frozen=True)
+class TempoAcceptEntry:
+    ts_raw: str
+    ts: Optional[dt.datetime]
+    a_title: str
+    a_norm: str
+    b_title: str
+    b_norm: str
+    delta_pct: Optional[float]
+    max_delta_pct: Optional[float]
+    attempt: Optional[str]
+
+
 class DockerClient:
     """Docker wrapper for control-plane introspection + controlled ops."""
 
@@ -51,6 +64,10 @@ class DockerClient:
     )
 
     _RE_STREAM_START = re.compile(r"\bBUS\s+STREAM_START\b.*\bsrc=playbin\b", re.IGNORECASE)
+    _RE_LOG_TS = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3})\s+")
+    _RE_DELTA_PCT = re.compile(r"\bdelta_pct=(?P<value>-?\d+(?:\.\d+)?)\b", re.IGNORECASE)
+    _RE_MAX_DELTA_PCT = re.compile(r"\bmax_delta_pct=(?P<value>-?\d+(?:\.\d+)?)\b", re.IGNORECASE)
+    _RE_ATTEMPT = re.compile(r"\battempt=(?P<value>\d+/\d+)\b", re.IGNORECASE)
 
     _RE_TEMPO_SELECT_OK_META = re.compile(
         r"""\btempo\(select(?::first)?\):\s*ok=True\b.*?\bmeta=(?P<meta>\{.*\})\s*$""",
@@ -649,6 +666,170 @@ class DockerClient:
             return result
 
         return result
+
+    @classmethod
+    def _extract_log_ts_raw(cls, line: str) -> str:
+        m = cls._RE_LOG_TS.match(line or "")
+        return str(m.group("ts") or "") if m else ""
+
+    @staticmethod
+    def _extract_float_from_line(pattern: re.Pattern[str], line: str) -> Optional[float]:
+        m = pattern.search(line or "")
+        if not m:
+            return None
+        try:
+            return round(float(m.group("value")), 2)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_attempt_from_line(line: str) -> Optional[str]:
+        m = DockerClient._RE_ATTEMPT.search(line or "")
+        return str(m.group("value") or "").strip() or None if m else None
+
+    def extract_tempo_accept_entries(self, engine_container: str, tail: int = 3000) -> Dict[str, Any]:
+        txt = self.tail_logs(engine_container, tail=tail)
+        if not txt or txt.startswith("[control]"):
+            return {
+                "ok": False,
+                "source": "engine_logs_tempo_accept",
+                "engine_container": engine_container,
+                "error": txt.strip() if txt else "empty logs",
+                "entries": [],
+            }
+
+        entries: List[TempoAcceptEntry] = []
+        for raw in txt.splitlines():
+            line = self._strip_docker_prefix(raw)
+
+            m_meta = self._RE_TEMPO_SELECT_OK_META.search(line)
+            if not m_meta:
+                continue
+
+            try:
+                meta = ast.literal_eval((m_meta.group("meta") or "").strip())
+            except Exception:
+                meta = None
+            if not isinstance(meta, dict):
+                continue
+
+            a_title = self._coerce_rel_title(str(meta.get("a_rel") or "")) or ""
+            b_title = self._coerce_rel_title(str(meta.get("b_rel") or "")) or ""
+            if not a_title or not b_title:
+                continue
+
+            ts_raw = self._extract_log_ts_raw(line)
+            entries.append(
+                TempoAcceptEntry(
+                    ts_raw=ts_raw,
+                    ts=self._parse_sched_ts(ts_raw) if ts_raw else None,
+                    a_title=a_title,
+                    a_norm=self.normalize_title(a_title),
+                    b_title=b_title,
+                    b_norm=self.normalize_title(b_title),
+                    delta_pct=self._extract_float_from_line(self._RE_DELTA_PCT, line),
+                    max_delta_pct=self._extract_float_from_line(self._RE_MAX_DELTA_PCT, line),
+                    attempt=self._extract_attempt_from_line(line),
+                )
+            )
+
+        return {
+            "ok": True,
+            "source": "engine_logs_tempo_accept",
+            "engine_container": engine_container,
+            "count": len(entries),
+            "entries": [
+                {
+                    "ts": e.ts_raw,
+                    "a_title": e.a_title,
+                    "a_norm": e.a_norm,
+                    "b_title": e.b_title,
+                    "b_norm": e.b_norm,
+                    "delta_pct": e.delta_pct,
+                    "max_delta_pct": e.max_delta_pct,
+                    "attempt": e.attempt,
+                }
+                for e in entries
+            ],
+        }
+
+    def compute_upcoming_from_tempo_accepts(
+        self,
+        engine_container: str,
+        current_title: Optional[str],
+        n: int = 10,
+        tail: int = 3000,
+    ) -> Dict[str, Any]:
+        cur_norm = self.normalize_title(current_title or "")
+        data = self.extract_tempo_accept_entries(engine_container, tail=tail)
+        if not data.get("ok"):
+            return {
+                "ok": False,
+                "error": data.get("error"),
+                "upcoming": [],
+                "source": "engine_logs_tempo_accept",
+            }
+
+        raw_entries = data.get("entries") or []
+        if not raw_entries:
+            return {
+                "ok": False,
+                "error": "no accepted tempo(select) entries found",
+                "upcoming": [],
+                "source": "engine_logs_tempo_accept",
+            }
+
+        start_idx: Optional[int] = None
+        current_title_found = False
+
+        if cur_norm:
+            for i in range(len(raw_entries) - 1, -1, -1):
+                entry = raw_entries[i] or {}
+                if (entry.get("a_norm") or "") == cur_norm:
+                    start_idx = i
+                    current_title_found = True
+                    break
+
+            if start_idx is None:
+                for i in range(len(raw_entries) - 1, -1, -1):
+                    entry = raw_entries[i] or {}
+                    if (entry.get("b_norm") or "") == cur_norm:
+                        start_idx = i + 1
+                        current_title_found = True
+                        break
+
+        seq = raw_entries[start_idx:] if start_idx is not None else raw_entries[-(n * 8):]
+
+        seen: set[str] = set()
+        out: List[Dict[str, Any]] = []
+        for entry in seq:
+            b_norm = str(entry.get("b_norm") or "").strip()
+            if not b_norm or b_norm == cur_norm or b_norm in seen:
+                continue
+            seen.add(b_norm)
+            out.append(
+                {
+                    "title": entry.get("b_title"),
+                    "title_display": self.display_title(str(entry.get("b_title") or "")),
+                    "playlist": None,
+                    "ts": entry.get("ts"),
+                    "from_title": entry.get("a_title"),
+                    "delta_pct": entry.get("delta_pct"),
+                    "max_delta_pct": entry.get("max_delta_pct"),
+                    "attempt": entry.get("attempt"),
+                }
+            )
+            if len(out) >= n:
+                break
+
+        return {
+            "ok": True,
+            "source": "engine_logs_tempo_accept_after_current" if current_title_found else "engine_logs_tempo_accept_fallback_tail",
+            "current_title_found": current_title_found,
+            "current_title": current_title,
+            "upcoming": out,
+            "entries_considered": len(seq),
+        }
 
     # ----------------------- Engine preprocess (compat) -----------------------
 
