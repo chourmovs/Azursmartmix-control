@@ -484,8 +484,10 @@ class ControlUI:
         self._now_title = None
         self._now_meta = None
         self._now_player = None
+        self._now_sources = None
 
         self._up_list_container = None
+        self._up_source = None
 
         self._log_html_engine = None
         self._log_html_sched = None
@@ -1065,7 +1067,7 @@ class ControlUI:
                 self._now_title = ui.label("—").classes("text-xl").style("font-weight: 950; margin: 2px 0 0 0;")
                 self._now_meta = ui.html(self._now_meta_html({}))
                 self._now_player = ui.html(self._player_html(stream_url))
-                ui.label("Sources: Icecast(observed) + scheduler NEXT + engine STREAM_START hint").style("opacity:.7; margin-top: 10px;")
+                self._now_sources = ui.label("Sources: Icecast metadata + engine tempo(select) + scheduler NEXT + engine STREAM_START").style("opacity:.7; margin-top: 10px;")
 
     def _now_meta_html(self, now: Dict[str, Any]) -> str:
         playlist_eff = now.get("playlist_effective")
@@ -1113,7 +1115,7 @@ class ControlUI:
         with ui.element("div").classes("az-card"):
             with ui.element("div").classes("az-card-h"):
                 ui.label("Upcoming")
-                ui.label("from scheduler NEXT log").classes("text-xs").style("opacity:.85;")
+                self._up_source = ui.label("from engine tempo(select) log").classes("text-xs").style("opacity:.85;")
             with ui.element("div").classes("az-card-b"):
                 self._up_list_container = ui.element("div").classes("az-list")
 
@@ -1478,11 +1480,16 @@ class ControlUI:
                 self._now_title.set_text(title)
             if self._now_meta:
                 self._now_meta.set_content(self._now_meta_html(now if isinstance(now, dict) else {}))
+            if self._now_sources:
+                source_txt = str((now.get("source") or "Icecast metadata + engine tempo(select)")).strip()
+                self._now_sources.set_text(f"Sources: {source_txt}")
         except Exception:
             if self._now_title:
                 self._now_title.set_text("—")
             if self._now_meta:
                 self._now_meta.set_content(self._now_meta_html({}))
+            if self._now_sources:
+                self._now_sources.set_text("Sources: —")
 
     async def refresh_upcoming(self) -> None:
         if self._up_list_container is None:
@@ -1492,8 +1499,16 @@ class ControlUI:
             items = up.get("upcoming") or []
             if not isinstance(items, list):
                 items = []
+            if self._up_source:
+                src = up.get("source") if isinstance(up, dict) else None
+                primary = None
+                if isinstance(src, dict):
+                    primary = src.get("primary")
+                self._up_source.set_text(str(primary or "from engine tempo(select) log"))
         except Exception:
             items = []
+            if self._up_source:
+                self._up_source.set_text("from engine tempo(select) log")
 
         self._up_list_container.clear()
         with self._up_list_container:
@@ -1506,16 +1521,25 @@ class ControlUI:
                 title = str(it.get("title_display") or it.get("title") or "—")
                 playlist = str(it.get("playlist") or "—")
                 ts = str(it.get("ts") or "")
+                delta_pct = it.get("delta_pct")
 
                 title_e = html.escape(title)
                 playlist_e = html.escape(playlist)
                 ts_e = html.escape(ts)
-                tail = f' <span class="t-dim">[{ts_e}]</span>' if ts else ""
+                delta_e = html.escape(f"{float(delta_pct):.2f}%") if isinstance(delta_pct, (int, float)) else ""
+                parts: List[str] = []
+                if playlist and playlist != "—":
+                    parts.append(f'<span class="t-cyan t-bold" data-copy="{playlist_e}">{playlist_e}</span>')
+                if delta_e:
+                    parts.append(f'<span class="t-dim">Δ</span> <span class="t-ok t-bold">{delta_e}</span>')
+                if ts:
+                    parts.append(f'<span class="t-dim">[{ts_e}]</span>')
+                tail = ""
+                if parts:
+                    tail = ' <span class="t-dim">|</span> ' + " ".join(parts)
                 ui.html(
                     f'<div class="az-item"><span class="idx">{i}.</span> '
-                    f'<span class="txt" data-copy="{title_e}">{title_e}</span> '
-                    f'<span class="t-dim">|</span> '
-                    f'<span class="t-cyan t-bold" data-copy="{playlist_e}">{playlist_e}</span>'
+                    f'<span class="txt" data-copy="{title_e}">{title_e}</span>'
                     f'{tail}'
                     f"</div>"
                 )
