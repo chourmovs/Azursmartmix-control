@@ -17,16 +17,16 @@ class DashboardMixin:
                 ui.label("Runtime Status")
                 self._docker_badge = ui.html(
                     '<span class="az-badge"><span class="az-dot warn"></span><span>Docker: …</span></span>'
-                )
+                ).props("id=docker_badge")
             with ui.element("div").classes("az-card-b"):
                 with ui.element("div").classes("rt-grid"):
-                    self._rt_engine_tbl = self._runtime_box("Engine")
-                    self._rt_sched_tbl = self._runtime_box("Scheduler")
+                    self._rt_engine_tbl = self._runtime_box("Engine", "rt_engine_tbl")
+                    self._rt_sched_tbl = self._runtime_box("Scheduler", "rt_sched_tbl")
 
-    def _runtime_box(self, title: str):
+    def _runtime_box(self, title: str, html_id: str):
         with ui.element("div").classes("rt-box"):
             ui.label(title).classes("rt-box-h")
-            tbl = ui.html(self._runtime_table_html({}))
+            tbl = ui.html(self._runtime_table_html({})).props(f"id={html_id}")
             return tbl
 
     def _runtime_table_html(self, data: Dict[str, Any]) -> str:
@@ -53,11 +53,11 @@ class DashboardMixin:
         with ui.element("div").classes("az-card"):
             with ui.element("div").classes("az-card-h"):
                 ui.label("Resources")
-                self._res_host_meta = ui.html('<span class="res-pill">host: …</span>')
+                self._res_host_meta = ui.html('<span class="res-pill">host: …</span>').props("id=res_host_meta")
             with ui.element("div").classes("az-card-b"):
                 with ui.element("div").classes("res-shell"):
-                    self._res_cpu_html = ui.html(self._resources_cpu_html({}))
-                    self._res_mem_html = ui.html(self._resources_mem_html({}))
+                    self._res_cpu_html = ui.html(self._resources_cpu_html({})).props("id=res_cpu_html")
+                    self._res_mem_html = ui.html(self._resources_mem_html({})).props("id=res_mem_html")
 
     @staticmethod
     def _fmt_bytes_gb(value: Any) -> str:
@@ -133,12 +133,12 @@ class DashboardMixin:
             with ui.element("div").classes("az-card-b"):
                 self._now_title = ui.label("—").classes("text-xl").style(
                     "font-weight: 950; margin: 2px 0 0 0;"
-                )
-                self._now_meta = ui.html(self._now_meta_html({}))
+                ).props("id=np_title")
+                self._now_meta = ui.html(self._now_meta_html({})).props("id=np_meta")
                 self._now_player = ui.html(self._player_html(stream_url))
                 self._now_sources = ui.label(
                     "Sources: Icecast metadata + engine tempo(select) + scheduler NEXT + engine STREAM_START"
-                ).style("opacity:.7; margin-top: 10px;")
+                ).style("opacity:.7; margin-top: 10px;").props("id=np_sources")
 
     def _now_meta_html(self, now: Dict[str, Any]) -> str:
         playlist_eff = now.get("playlist_effective")
@@ -212,9 +212,9 @@ class DashboardMixin:
                 ui.label("Upcoming")
                 self._up_source = ui.label("from engine tempo(select) log").classes("text-xs").style(
                     "opacity:.85;"
-                )
+                ).props("id=up_source")
             with ui.element("div").classes("az-card-b"):
-                self._up_list_container = ui.element("div").classes("az-list")
+                self._up_list_container = ui.html('<div class="az-list"><div style="opacity:.7;">—</div></div>').props("id=upcoming_list")
 
     def _card_logs(self) -> None:
         with ui.element("div").classes("az-card").style("grid-column: 1 / -1;"):
@@ -231,26 +231,14 @@ class DashboardMixin:
                         with ui.element("div").classes("console-frame").style(
                             "background: rgba(0,0,0,.55) !important;"
                         ):
-                            self._log_html_engine = ui.html('<div class="console-content">—</div>')
+                            self._log_html_engine = ui.html('<div class="console-content">—</div>').props("id=log_engine")
                     with ui.tab_panel("scheduler"):
                         with ui.element("div").classes("console-frame").style(
                             "background: rgba(0,0,0,.55) !important;"
                         ):
-                            self._log_html_sched = ui.html('<div class="console-content">—</div>')
+                            self._log_html_sched = ui.html('<div class="console-content">—</div>').props("id=log_sched")
 
-    async def refresh_dashboard(self) -> None:
-        await self.refresh_resources()
-        await self.refresh_runtime()
-        await self.refresh_now()
-        await self.refresh_upcoming()
-        await self.refresh_logs()
-
-    async def refresh_resources(self) -> None:
-        try:
-            data = await self._get_json("/panel/resources")
-        except Exception:
-            data = {}
-
+    def _apply_resources_payload(self, data: Dict[str, Any]) -> None:
         if self._res_host_meta:
             src = html.escape(str(data.get("source") or "host"))
             self._res_host_meta.set_content(f'<span class="res-pill">source: {src}</span>')
@@ -263,17 +251,7 @@ class DashboardMixin:
                 self._resources_mem_html(data if isinstance(data, dict) else {})
             )
 
-    async def refresh_runtime(self) -> None:
-        try:
-            rt = await self._get_json("/panel/runtime")
-        except Exception:
-            self._set_docker_badge(ok=False, text="Docker: error")
-            if self._rt_engine_tbl:
-                self._rt_engine_tbl.set_content(self._runtime_table_html({"status": "error"}))
-            if self._rt_sched_tbl:
-                self._rt_sched_tbl.set_content(self._runtime_table_html({"status": "error"}))
-            return
-
+    def _apply_runtime_payload(self, rt: Dict[str, Any]) -> None:
         docker_ok = bool(rt.get("docker_ping"))
         self._set_docker_badge(ok=docker_ok, text=f"Docker: {'OK' if docker_ok else 'DOWN'}")
 
@@ -284,6 +262,127 @@ class DashboardMixin:
             self._rt_engine_tbl.set_content(self._runtime_table_html(eng))
         if self._rt_sched_tbl:
             self._rt_sched_tbl.set_content(self._runtime_table_html(sch))
+
+    def _apply_now_payload(self, now: Dict[str, Any]) -> None:
+        title = now.get("title_effective") or now.get("title_observed") or "—"
+        if self._now_title:
+            self._now_title.set_text(title)
+        if self._now_meta:
+            self._now_meta.set_content(self._now_meta_html(now if isinstance(now, dict) else {}))
+        if self._now_sources:
+            source_txt = str((now.get("source") or "Icecast metadata + engine tempo(select)")).strip()
+            self._now_sources.set_text(f"Sources: {source_txt}")
+
+    def _apply_upcoming_payload(self, up: Dict[str, Any]) -> None:
+        items = up.get("upcoming") or []
+        if not isinstance(items, list):
+            items = []
+
+        if self._up_source:
+            src = up.get("source") if isinstance(up, dict) else None
+            primary = None
+            if isinstance(src, dict):
+                primary = src.get("primary")
+            self._up_source.set_text(str(primary or "from engine tempo(select) log"))
+
+        if self._up_list_container is None:
+            return
+
+        if not items:
+            self._up_list_container.set_content('<div class="az-list"><div style="opacity:.7;">—</div></div>')
+            return
+
+        rows: List[str] = []
+        for i, it in enumerate(items, start=1):
+            if not isinstance(it, dict):
+                continue
+            title = str(it.get("title_display") or it.get("title") or "—")
+            playlist = str(it.get("playlist") or "—")
+            ts = str(it.get("ts") or "")
+            delta_pct = it.get("delta_pct")
+
+            title_e = html.escape(title)
+            playlist_e = html.escape(playlist)
+            ts_e = html.escape(ts)
+            delta_e = (
+                html.escape(f"{float(delta_pct):.2f}%")
+                if isinstance(delta_pct, (int, float))
+                else ""
+            )
+
+            parts: List[str] = []
+            if playlist and playlist != "—":
+                parts.append(
+                    f'<span class="t-cyan t-bold" data-copy="{playlist_e}">{playlist_e}</span>'
+                )
+            if delta_e:
+                parts.append(f'<span class="t-dim">Δ</span> <span class="t-ok t-bold">{delta_e}</span>')
+            if ts:
+                parts.append(f'<span class="t-dim">[{ts_e}]</span>')
+
+            tail = ""
+            if parts:
+                tail = ' <span class="t-dim">|</span> ' + " ".join(parts)
+
+            rows.append(
+                f'<div class="az-item"><span class="idx">{i}.</span> '
+                f'<span class="txt" data-copy="{title_e}">{title_e}</span>'
+                f'{tail}'
+                f"</div>"
+            )
+
+        self._up_list_container.set_content('<div class="az-list">' + "".join(rows) + "</div>")
+
+    def _apply_logs_payload(self, engine_text: str, scheduler_text: str) -> None:
+        if self._log_html_engine:
+            self._log_html_engine.set_content(
+                f'<div class="console-content">{html.escape(engine_text)}</div>'
+            )
+        if self._log_html_sched:
+            self._log_html_sched.set_content(
+                f'<div class="console-content">{html.escape(scheduler_text)}</div>'
+            )
+
+    async def refresh_dashboard(self) -> None:
+        try:
+            data = await self._get_json("/panel/dashboard?upcoming_n=10&include_logs=true&engine_log_tail=200&scheduler_log_tail=200")
+        except Exception:
+            await self.refresh_resources()
+            await self.refresh_runtime()
+            await self.refresh_now()
+            await self.refresh_upcoming()
+            await self.refresh_logs()
+            return
+
+        self._apply_resources_payload(data.get("resources") if isinstance(data, dict) else {})
+        self._apply_runtime_payload(data.get("runtime") if isinstance(data, dict) else {})
+        self._apply_now_payload(data.get("now") if isinstance(data, dict) else {})
+        self._apply_upcoming_payload(data.get("upcoming") if isinstance(data, dict) else {})
+
+        logs = data.get("logs") if isinstance(data, dict) and isinstance(data.get("logs"), dict) else {}
+        self._apply_logs_payload(
+            str(logs.get("engine") or "—"),
+            str(logs.get("scheduler") or "—"),
+        )
+
+    async def refresh_resources(self) -> None:
+        try:
+            data = await self._get_json("/panel/resources")
+        except Exception:
+            data = {}
+        self._apply_resources_payload(data if isinstance(data, dict) else {})
+
+    async def refresh_runtime(self) -> None:
+        try:
+            rt = await self._get_json("/panel/runtime")
+        except Exception:
+            self._set_docker_badge(ok=False, text="Docker: error")
+            if self._rt_engine_tbl:
+                self._rt_engine_tbl.set_content(self._runtime_table_html({"status": "error"}))
+            if self._rt_sched_tbl:
+                self._rt_sched_tbl.set_content(self._runtime_table_html({"status": "error"}))
+            return
+        self._apply_runtime_payload(rt if isinstance(rt, dict) else {})
 
     def _set_docker_badge(self, ok: bool, text: str) -> None:
         if self._docker_badge is None:
@@ -296,14 +395,7 @@ class DashboardMixin:
     async def refresh_now(self) -> None:
         try:
             now = await self._get_json("/panel/now")
-            title = now.get("title_effective") or now.get("title_observed") or "—"
-            if self._now_title:
-                self._now_title.set_text(title)
-            if self._now_meta:
-                self._now_meta.set_content(self._now_meta_html(now if isinstance(now, dict) else {}))
-            if self._now_sources:
-                source_txt = str((now.get("source") or "Icecast metadata + engine tempo(select)")).strip()
-                self._now_sources.set_text(f"Sources: {source_txt}")
+            self._apply_now_payload(now if isinstance(now, dict) else {})
         except Exception:
             if self._now_title:
                 self._now_title.set_text("—")
@@ -313,85 +405,21 @@ class DashboardMixin:
                 self._now_sources.set_text("Sources: —")
 
     async def refresh_upcoming(self) -> None:
-        if self._up_list_container is None:
-            return
         try:
             up = await self._get_json("/panel/upcoming?n=10")
-            items = up.get("upcoming") or []
-            if not isinstance(items, list):
-                items = []
-            if self._up_source:
-                src = up.get("source") if isinstance(up, dict) else None
-                primary = None
-                if isinstance(src, dict):
-                    primary = src.get("primary")
-                self._up_source.set_text(str(primary or "from engine tempo(select) log"))
         except Exception:
-            items = []
-            if self._up_source:
-                self._up_source.set_text("from engine tempo(select) log")
-
-        self._up_list_container.clear()
-        with self._up_list_container:
-            if not items:
-                ui.html('<div style="opacity:.7;">—</div>')
-                return
-
-            for i, it in enumerate(items, start=1):
-                if not isinstance(it, dict):
-                    continue
-                title = str(it.get("title_display") or it.get("title") or "—")
-                playlist = str(it.get("playlist") or "—")
-                ts = str(it.get("ts") or "")
-                delta_pct = it.get("delta_pct")
-
-                title_e = html.escape(title)
-                playlist_e = html.escape(playlist)
-                ts_e = html.escape(ts)
-                delta_e = (
-                    html.escape(f"{float(delta_pct):.2f}%")
-                    if isinstance(delta_pct, (int, float))
-                    else ""
-                )
-
-                parts: List[str] = []
-                if playlist and playlist != "—":
-                    parts.append(
-                        f'<span class="t-cyan t-bold" data-copy="{playlist_e}">{playlist_e}</span>'
-                    )
-                if delta_e:
-                    parts.append(f'<span class="t-dim">Δ</span> <span class="t-ok t-bold">{delta_e}</span>')
-                if ts:
-                    parts.append(f'<span class="t-dim">[{ts_e}]</span>')
-
-                tail = ""
-                if parts:
-                    tail = ' <span class="t-dim">|</span> ' + " ".join(parts)
-
-                ui.html(
-                    f'<div class="az-item"><span class="idx">{i}.</span> '
-                    f'<span class="txt" data-copy="{title_e}">{title_e}</span>'
-                    f'{tail}'
-                    f"</div>"
-                )
+            up = {}
+        self._apply_upcoming_payload(up if isinstance(up, dict) else {})
 
     async def refresh_logs(self) -> None:
         try:
             eng = await self._get_text("/logs?service=engine&tail=200")
-            if self._log_html_engine:
-                self._log_html_engine.set_content(
-                    f'<div class="console-content">{html.escape(eng)}</div>'
-                )
         except Exception:
-            if self._log_html_engine:
-                self._log_html_engine.set_content('<div class="console-content">—</div>')
+            eng = "—"
 
         try:
             sch = await self._get_text("/logs?service=scheduler&tail=200")
-            if self._log_html_sched:
-                self._log_html_sched.set_content(
-                    f'<div class="console-content">{html.escape(sch)}</div>'
-                )
         except Exception:
-            if self._log_html_sched:
-                self._log_html_sched.set_content('<div class="console-content">—</div>')
+            sch = "—"
+
+        self._apply_logs_payload(eng, sch)
