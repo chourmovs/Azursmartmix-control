@@ -395,6 +395,105 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
   color: rgba(255,255,255,.92) !important;
   font-family: var(--az-mono) !important;
 }
+
+/* SIMPLE LIVE PLAYER */
+.az-stream-player{
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--az-border);
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.18));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+}
+.az-stream-audio{
+  display: none;
+}
+.az-stream-top{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.az-stream-live{
+  display:inline-flex;
+  align-items:center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(239,68,68,.12);
+  border: 1px solid rgba(239,68,68,.28);
+  color: rgba(255,255,255,.96);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .04em;
+}
+.az-live-dot{
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--az-red);
+  box-shadow: 0 0 0 4px rgba(239,68,68,.18);
+}
+.az-stream-state{
+  font-family: var(--az-mono);
+  font-size: 12px;
+  color: rgba(255,255,255,.68);
+}
+.az-stream-controls{
+  display:flex;
+  flex-wrap: wrap;
+  align-items:center;
+  gap: 10px;
+}
+.az-stream-btn{
+  appearance: none;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(255,255,255,.05);
+  color: rgba(255,255,255,.94);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: transform .12s ease, background .12s ease, border-color .12s ease;
+}
+.az-stream-btn:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,.08);
+  border-color: rgba(255,255,255,.24);
+}
+.az-stream-btn.primary{
+  background: linear-gradient(180deg, rgba(30,136,229,.96), rgba(21,101,192,.96));
+  border-color: rgba(30,136,229,.65);
+  color: #fff;
+}
+.az-stream-volume-wrap{
+  display:inline-flex;
+  align-items:center;
+  gap: 10px;
+  margin-left: auto;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.14);
+}
+.az-stream-vol-label{
+  font-family: var(--az-mono);
+  font-size: 12px;
+  color: rgba(255,255,255,.72);
+}
+.az-stream-volume{
+  width: 140px;
+  accent-color: var(--az-blue);
+}
+.az-stream-hint{
+  margin-top: 10px;
+  font-size: 13px;
+  color: rgba(255,255,255,.65);
+  font-family: var(--az-mono);
+  word-break: break-all;
+}
 """
 
 AZURA_JS = r"""
@@ -405,4 +504,110 @@ document.addEventListener('click', (ev) => {
   if (!txt) return;
   navigator.clipboard.writeText(txt).catch(()=>{});
 });
+
+(function(){
+  function findPlayer(playerId){
+    const root = document.getElementById(playerId);
+    if (!root) return null;
+    const audio = root.querySelector('.az-stream-audio');
+    const state = root.querySelector('[data-role="state"]');
+    if (!audio || !state) return null;
+    return { root, audio, state };
+  }
+
+  function stampUrl(baseUrl){
+    try{
+      const u = new URL(baseUrl, window.location.href);
+      u.searchParams.set('_ts', String(Date.now()));
+      return u.toString();
+    }catch(_e){
+      const sep = baseUrl.includes('?') ? '&' : '?';
+      return `${baseUrl}${sep}_ts=${Date.now()}`;
+    }
+  }
+
+  function setState(stateEl, text){
+    if (stateEl) stateEl.textContent = text;
+  }
+
+  function bindOnce(ctx){
+    if (!ctx || ctx.audio.dataset.bound === '1') return;
+    ctx.audio.dataset.bound = '1';
+
+    ctx.audio.addEventListener('playing', () => setState(ctx.state, 'playing'));
+    ctx.audio.addEventListener('pause', () => {
+      if (!ctx.audio.src) {
+        setState(ctx.state, 'idle');
+        return;
+      }
+      setState(ctx.state, 'paused');
+    });
+    ctx.audio.addEventListener('waiting', () => setState(ctx.state, 'buffering'));
+    ctx.audio.addEventListener('stalled', () => setState(ctx.state, 'stalled'));
+    ctx.audio.addEventListener('loadstart', () => setState(ctx.state, 'connecting'));
+    ctx.audio.addEventListener('emptied', () => setState(ctx.state, 'idle'));
+    ctx.audio.addEventListener('error', () => setState(ctx.state, 'error'));
+  }
+
+  window.azStreamPlay = async function(playerId){
+    const ctx = findPlayer(playerId);
+    if (!ctx) return;
+    bindOnce(ctx);
+
+    const baseUrl = ctx.root.getAttribute('data-stream-url') || '';
+    if (!baseUrl) {
+      setState(ctx.state, 'missing-url');
+      return;
+    }
+
+    const nextUrl = stampUrl(baseUrl);
+
+    try{
+      if (ctx.audio.src !== nextUrl) {
+        ctx.audio.src = nextUrl;
+      }
+      ctx.audio.load();
+      setState(ctx.state, 'connecting');
+      await ctx.audio.play();
+    }catch(_e){
+      setState(ctx.state, 'blocked');
+    }
+  };
+
+  window.azStreamStop = function(playerId){
+    const ctx = findPlayer(playerId);
+    if (!ctx) return;
+    bindOnce(ctx);
+
+    try{
+      ctx.audio.pause();
+      ctx.audio.removeAttribute('src');
+      ctx.audio.load();
+    }catch(_e){}
+    setState(ctx.state, 'stopped');
+  };
+
+  window.azStreamToggleMute = function(playerId){
+    const ctx = findPlayer(playerId);
+    if (!ctx) return;
+    bindOnce(ctx);
+
+    ctx.audio.muted = !ctx.audio.muted;
+    setState(ctx.state, ctx.audio.muted ? 'muted' : (ctx.audio.paused ? 'paused' : 'playing'));
+  };
+
+  window.azStreamSetVolume = function(playerId, value){
+    const ctx = findPlayer(playerId);
+    if (!ctx) return;
+    bindOnce(ctx);
+
+    const n = Number(value);
+    if (!Number.isFinite(n)) return;
+    const vol = Math.max(0, Math.min(100, n)) / 100.0;
+    ctx.audio.volume = vol;
+    if (vol > 0 && ctx.audio.muted) {
+      ctx.audio.muted = false;
+    }
+  };
+})();
 """
