@@ -96,6 +96,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
         self._tag_value = None  # type: ignore[assignment]
 
         self._restart_badge = None
+        self._client_sync_badge = None
 
         self._tabs = None
         self._tab_dashboard = "Dashboard"
@@ -221,6 +222,9 @@ class ControlUI(SettingsMixin, DashboardMixin):
             with ui.row().classes("items-center gap-3"):
                 ui.label("azuracast").classes("az-brand text-xl")
                 ui.label("AzurSmartMix Control").classes("az-sub text-sm")
+                self._client_sync_badge = ui.html(
+                    '<span class="az-badge"><span class="az-dot warn"></span><span>Sync: …</span></span>'
+                ).classes("ml-2").props("id=client_sync_badge")
                 self._restart_badge = ui.html("").classes("ml-2")
 
             with ui.row().classes("items-center gap-2 az-opbtn"):
@@ -252,7 +256,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
                 ui.button("Refresh", on_click=self.refresh_visible).props(
                     "unelevated color=white text-color=primary"
                 )
-                ui.button("Auto 5s", on_click=self.enable_autorefresh).props("outline")
+                ui.button("Auto JS", on_click=self.enable_autorefresh).props("outline")
                 ui.button("Stop Auto", on_click=self.disable_autorefresh).props("outline")
 
         with ui.element("div").classes("az-wrap"):
@@ -298,14 +302,22 @@ class ControlUI(SettingsMixin, DashboardMixin):
             value = self._tab_dashboard
 
         if value == self._tab_settings:
+            self.disable_autorefresh()
             await self.refresh_settings()
             return
+
+        self.enable_autorefresh()
         await self.refresh_dashboard()
 
     async def refresh_visible(self) -> None:
         if self._current_main_tab() == self._tab_settings:
             await self.refresh_settings()
             return
+
+        try:
+            ui.run_javascript("window.azDashboardRefreshNow && window.azDashboardRefreshNow();")
+        except Exception:
+            pass
         await self.refresh_dashboard()
 
     def _on_tag_change(self, e) -> None:
@@ -456,11 +468,17 @@ class ControlUI(SettingsMixin, DashboardMixin):
         await self.refresh_dashboard()
 
     def enable_autorefresh(self) -> None:
-        if self._timer is not None:
-            return
-        self._timer = ui.timer(5.0, self._autorefresh_tick)
+        try:
+            ui.run_javascript("window.azDashboardStart && window.azDashboardStart();")
+        except Exception:
+            if self._timer is None:
+                self._timer = ui.timer(5.0, self._autorefresh_tick)
 
     def disable_autorefresh(self) -> None:
+        try:
+            ui.run_javascript("window.azDashboardStop && window.azDashboardStop();")
+        except Exception:
+            pass
         if self._timer is not None:
             self._timer.cancel()
         self._timer = None
