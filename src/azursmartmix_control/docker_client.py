@@ -49,6 +49,20 @@ class TempoAcceptEntry:
     attempt: Optional[str]
 
 
+@dataclass(frozen=True)
+class TempoEvent:
+    kind: str
+    ts_raw: Optional[str]
+    ts: Optional[dt.datetime]
+    a_title: Optional[str]
+    a_norm: str
+    b_title: Optional[str]
+    b_norm: str
+    delta_pct: Optional[float]
+    max_delta_pct: Optional[float]
+    attempt: Optional[str]
+
+
 class DockerClient:
     """Docker wrapper for control-plane introspection + controlled ops."""
 
@@ -660,49 +674,102 @@ class DockerClient:
         m = DockerClient._RE_ATTEMPT.search(line or "")
         return str(m.group("value") or "").strip() or None if m else None
 
-    def extract_tempo_accept_entries(self, engine_container: str, tail: int = 3000) -> Dict[str, Any]:
+    def extract_tempo_event_stream(self, engine_container: str, tail: int = 3000) -> Dict[str, Any]:
         txt = self.tail_logs(engine_container, tail=tail)
         if not txt or txt.startswith("[control]"):
             return {
                 "ok": False,
-                "source": "engine_logs_tempo_accept",
+                "source": "engine_logs_tempo_event_stream",
                 "engine_container": engine_container,
                 "error": txt.strip() if txt else "empty logs",
+                "events": [],
+            }
+
+        events: List[TempoEvent] = []
+
+        for raw in txt.splitlines():
+            line = self._strip_docker_prefix(raw)
+            ts_raw = self._extract_log_ts_raw(line)
+            ts = self._parse_sched_ts(ts_raw) if ts_raw else None
+
+            m_meta = self._RE_TEMPO_SELECT_OK_META.search(line)
+            if m_meta:
+                try:
+                    meta = ast.literal_eval((m_meta.group("meta") or "").strip())
+                except Exception:
+                    meta = None
+
+                if isinstance(meta, dict):
+                    a_title = self._coerce_rel_title(str(meta.get("a_rel") or ""))
+                    b_title = self._coerce_rel_title(str(meta.get("b_rel") or ""))
+                    if a_title and b_title:
+                        events.append(
+                            TempoEvent(
+                                kind="accept",
+                                ts_raw=ts_raw,
+                                ts=ts,
+                                a_title=a_title,
+                                a_norm=self.normalize_title(a_title),
+                                b_title=b_title,
+                                b_norm=self.normalize_title(b_title),
+                                delta_pct=self._extract_float_from_line(self._RE_DELTA_PCT, line),
+                                max_delta_pct=self._extract_float_from_line(self._RE_MAX_DELTA_PCT, line),
+                                attempt=self._extract_attempt_from_line(line),
+                            )
+                        )
+                        continue
+
+            if self._RE_TEMPO_EXHAUST_FAIL_OPEN.search(line):
+                events.append(
+                    TempoEvent(
+                        kind="fail_open",
+                        ts_raw=ts_raw,
+                        ts=ts,
+                        a_title=None,
+                        a_norm="",
+                        b_title=None,
+                        b_norm="",
+                        delta_pct=None,
+                        max_delta_pct=None,
+                        attempt=None,
+                    )
+                )
+
+        return {
+            "ok": True,
+            "source": "engine_logs_tempo_event_stream",
+            "engine_container": engine_container,
+            "count": len(events),
+            "events": events,
+        }
+
+    def extract_tempo_accept_entries(self, engine_container: str, tail: int = 3000) -> Dict[str, Any]:
+        data = self.extract_tempo_event_stream(engine_container, tail=tail)
+        if not data.get("ok"):
+            return {
+                "ok": False,
+                "source": "engine_logs_tempo_accept",
+                "engine_container": engine_container,
+                "error": data.get("error"),
                 "entries": [],
             }
 
+        events = data.get("events") or []
         entries: List[TempoAcceptEntry] = []
-        for raw in txt.splitlines():
-            line = self._strip_docker_prefix(raw)
-
-            m_meta = self._RE_TEMPO_SELECT_OK_META.search(line)
-            if not m_meta:
+        for ev in events:
+            if not isinstance(ev, TempoEvent) or ev.kind != "accept":
                 continue
-
-            try:
-                meta = ast.literal_eval((m_meta.group("meta") or "").strip())
-            except Exception:
-                meta = None
-            if not isinstance(meta, dict):
-                continue
-
-            a_title = self._coerce_rel_title(str(meta.get("a_rel") or "")) or ""
-            b_title = self._coerce_rel_title(str(meta.get("b_rel") or "")) or ""
-            if not a_title or not b_title:
-                continue
-
-            ts_raw = self._extract_log_ts_raw(line)
             entries.append(
                 TempoAcceptEntry(
-                    ts_raw=ts_raw,
-                    ts=self._parse_sched_ts(ts_raw) if ts_raw else None,
-                    a_title=a_title,
-                    a_norm=self.normalize_title(a_title),
-                    b_title=b_title,
-                    b_norm=self.normalize_title(b_title),
-                    delta_pct=self._extract_float_from_line(self._RE_DELTA_PCT, line),
-                    max_delta_pct=self._extract_float_from_line(self._RE_MAX_DELTA_PCT, line),
-                    attempt=self._extract_attempt_from_line(line),
+                    ts_raw=ev.ts_raw or "",
+                    ts=ev.ts,
+                    a_title=ev.a_title or "",
+                    a_norm=ev.a_norm,
+                    b_title=ev.b_title or "",
+                    b_norm=ev.b_norm,
+                    delta_pct=ev.delta_pct,
+                    max_delta_pct=ev.max_delta_pct,
+                    attempt=ev.attempt,
                 )
             )
 
@@ -734,7 +801,7 @@ class DockerClient:
         tail: int = 3000,
     ) -> Dict[str, Any]:
         cur_norm = self.normalize_title(current_title or "")
-        data = self.extract_tempo_accept_entries(engine_container, tail=tail)
+        data = self.extract_tempo_event_stream(engine_container, tail=tail)
         if not data.get("ok"):
             return {
                 "ok": False,
@@ -743,11 +810,11 @@ class DockerClient:
                 "source": "engine_logs_tempo_accept",
             }
 
-        raw_entries = data.get("entries") or []
-        if not raw_entries:
+        events = data.get("events") or []
+        if not events:
             return {
                 "ok": False,
-                "error": "no accepted tempo(select) entries found",
+                "error": "no tempo events found",
                 "upcoming": [],
                 "source": "engine_logs_tempo_accept",
             }
@@ -760,24 +827,28 @@ class DockerClient:
                 "current_title": current_title,
                 "upcoming": [],
                 "entries_considered": 0,
+                "barrier_hit": False,
             }
 
-        start_idx: Optional[int] = None
+        anchor_idx: Optional[int] = None
+        include_anchor_event = False
 
-        for i in range(len(raw_entries) - 1, -1, -1):
-            entry = raw_entries[i] or {}
-            if (entry.get("a_norm") or "") == cur_norm:
-                start_idx = i
+        for i in range(len(events) - 1, -1, -1):
+            ev = events[i]
+            if not isinstance(ev, TempoEvent) or ev.kind != "accept":
+                continue
+
+            if ev.a_norm == cur_norm:
+                anchor_idx = i
+                include_anchor_event = True
                 break
 
-        if start_idx is None:
-            for i in range(len(raw_entries) - 1, -1, -1):
-                entry = raw_entries[i] or {}
-                if (entry.get("b_norm") or "") == cur_norm:
-                    start_idx = i + 1
-                    break
+            if ev.b_norm == cur_norm:
+                anchor_idx = i + 1
+                include_anchor_event = False
+                break
 
-        if start_idx is None:
+        if anchor_idx is None:
             return {
                 "ok": True,
                 "source": "engine_logs_tempo_accept_unanchored",
@@ -785,29 +856,53 @@ class DockerClient:
                 "current_title": current_title,
                 "upcoming": [],
                 "entries_considered": 0,
+                "barrier_hit": False,
             }
 
-        seq = raw_entries[start_idx:]
-
+        seq = events[anchor_idx:] if include_anchor_event else events[anchor_idx:]
         seen: set[str] = set()
         out: List[Dict[str, Any]] = []
-        for entry in seq:
-            b_norm = str(entry.get("b_norm") or "").strip()
-            if not b_norm or b_norm == cur_norm or b_norm in seen:
+        entries_considered = 0
+        barrier_hit = False
+
+        for ev in seq:
+            if not isinstance(ev, TempoEvent):
                 continue
+
+            if ev.kind == "fail_open":
+                barrier_hit = True
+                break
+
+            if ev.kind != "accept":
+                continue
+
+            entries_considered += 1
+
+            if ev.a_norm != cur_norm and not out:
+                # Tant qu'on n'a pas démarré une chaîne cohérente depuis le morceau courant,
+                # on ne laisse rien passer.
+                continue
+
+            b_norm = ev.b_norm.strip()
+            if not b_norm or b_norm == cur_norm or b_norm in seen:
+                cur_norm = b_norm or cur_norm
+                continue
+
             seen.add(b_norm)
             out.append(
                 {
-                    "title": entry.get("b_title"),
-                    "title_display": self.display_title(str(entry.get("b_title") or "")),
+                    "title": ev.b_title,
+                    "title_display": self.display_title(str(ev.b_title or "")),
                     "playlist": None,
-                    "ts": entry.get("ts"),
-                    "from_title": entry.get("a_title"),
-                    "delta_pct": entry.get("delta_pct"),
-                    "max_delta_pct": entry.get("max_delta_pct"),
-                    "attempt": entry.get("attempt"),
+                    "ts": ev.ts_raw,
+                    "from_title": ev.a_title,
+                    "delta_pct": ev.delta_pct,
+                    "max_delta_pct": ev.max_delta_pct,
+                    "attempt": ev.attempt,
                 }
             )
+            cur_norm = b_norm
+
             if len(out) >= n:
                 break
 
@@ -817,7 +912,8 @@ class DockerClient:
             "current_title_found": True,
             "current_title": current_title,
             "upcoming": out,
-            "entries_considered": len(seq),
+            "entries_considered": entries_considered,
+            "barrier_hit": barrier_hit,
         }
 
     # ----------------------- Engine preprocess (compat) -----------------------
