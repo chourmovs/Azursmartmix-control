@@ -162,306 +162,301 @@ class DockerClient:
         return self._run_cmd(["docker", "compose", "up", "-d", "--force-recreate"], cwd=azuramix_dir)
 
     def compose_update(self, azuramix_dir: str, image_ref: str) -> Dict[str, Any]:
-        """docker compose down && docker image rm -f <image> || true"""
-        r1 = self._run_cmd(["docker", "compose", "down"], cwd=azuramix_dir)
-        r2 = self._run_cmd(["docker", "image", "rm", "-f", image_ref], cwd=azuramix_dir)
-
-        # emulate "|| true" for image rm
-        r2["ok"] = True
-
-        ok = bool(r1.get("ok"))
+        step_down = self._run_cmd(["docker", "compose", "down"], cwd=azuramix_dir)
+        step_image_rm = self._run_cmd(["docker", "image", "rm", "-f", image_ref], cwd=azuramix_dir)
+        ok = bool(step_down.get("ok")) and bool(step_image_rm.get("ok") or step_image_rm.get("rc") == 0)
         return {
             "ok": ok,
-            "step_down": r1,
-            "step_image_rm": r2,
+            "step_down": step_down,
+            "step_image_rm": step_image_rm,
             "image_ref": image_ref,
         }
 
-    # ----------------------- Docker API basics -----------------------
+    # ----------------------- Docker info -----------------------
 
-    def ping(self) -> bool:
+    def _get_container(self, name: str):
         try:
-            self.client.ping()
-            return True
-        except DockerException:
-            return False
-
-    def get_container_info(self, name: str) -> Optional[ContainerInfo]:
-        try:
-            c = self.client.containers.get(name)
+            return self.client.containers.get(name)
         except NotFound:
             return None
         except DockerException:
             return None
 
+    @staticmethod
+    def _parse_dt(v: Optional[str]) -> Optional[dt.datetime]:
+        if not v:
+            return None
+        try:
+            return dt.datetime.fromisoformat(v.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    def inspect_container(self, name: str) -> Dict[str, Any]:
+        c = self._get_container(name)
+        if c is None:
+            return {"present": False, "name": name}
+
         attrs = getattr(c, "attrs", {}) or {}
-        state = (attrs.get("State") or {})
+        state = attrs.get("State", {}) or {}
+        config = attrs.get("Config", {}) or {}
+
+        created = attrs.get("Created")
+        started = state.get("StartedAt")
+        now = dt.datetime.now(dt.timezone.utc)
+
+        created_dt = self._parse_dt(created)
+        started_dt = self._parse_dt(started)
+
+        age_s = None
+        uptime_s = None
+        if created_dt:
+            age_s = int((now - created_dt).total_seconds())
+        if started_dt and state.get("Running"):
+            uptime_s = int((now - started_dt).total_seconds())
+
         health = None
         if isinstance(state.get("Health"), dict):
             health = state["Health"].get("Status")
 
-        created = attrs.get("Created")
-        started = state.get("StartedAt")
         image = ""
         try:
-            image = (attrs.get("Config") or {}).get("Image") or ""
+            image = str(config.get("Image") or getattr(c.image, "tags", [""])[0] or "")
         except Exception:
-            image = ""
-
-        return ContainerInfo(
-            name=name,
-            id=c.id[:12],
-            image=image,
-            status=getattr(c, "status", "unknown"),
-            created_at=created,
-            health=health,
-            started_at=started,
-        )
-
-    def tail_logs(self, name: str, tail: int = 300) -> str:
-        try:
-            c = self.client.containers.get(name)
-            raw: bytes = c.logs(tail=tail, timestamps=True)  # type: ignore[assignment]
-            return raw.decode("utf-8", errors="replace")
-        except NotFound:
-            return f"[control] container not found: {name}\n"
-        except DockerException as e:
-            return f"[control] docker error: {e}\n"
-        except Exception as e:
-            return f"[control] unexpected error: {e}\n"
-
-    def runtime_summary(self, engine_name: str, sched_name: str) -> Dict[str, Any]:
-        now = dt.datetime.now(dt.timezone.utc)
-        return {
-            "now_utc": now.isoformat(),
-            "docker_ping": self.ping(),
-            "engine": self._container_info_dict(engine_name, now),
-            "scheduler": self._container_info_dict(sched_name, now),
-        }
-
-    def host_resources_summary(self) -> Dict[str, Any]:
-        now = dt.datetime.now(dt.timezone.utc)
-
-        cpu = self._read_host_cpu_percent()
-        mem = self._read_host_memory()
-        loadavg = self._read_host_loadavg()
-
-        ok = bool(mem.get("ok"))
-        if cpu.get("ok"):
-            ok = True
-        if loadavg.get("ok"):
-            ok = True
-
-        return {
-            "ok": ok,
-            "now_utc": now.isoformat(),
-            "source": "host_procfs",
-            "cpu": cpu,
-            "memory": mem,
-            "loadavg": loadavg,
-        }
-
-    def _read_host_cpu_percent(self) -> Dict[str, Any]:
-        try:
-            line = Path('/proc/stat').read_text().splitlines()[0]
-            parts = [int(x) for x in line.split()[1:]]
-            if len(parts) < 4:
-                return {"ok": False, "error": "unexpected /proc/stat format", "percent": None}
-
-            idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
-            total = sum(parts)
-
-            prev_total = self._host_cpu_prev_total
-            prev_idle = self._host_cpu_prev_idle
-            self._host_cpu_prev_total = total
-            self._host_cpu_prev_idle = idle
-
-            if prev_total is None or prev_idle is None or total <= prev_total:
-                return {"ok": True, "percent": None, "sample": "warmup"}
-
-            total_delta = total - prev_total
-            idle_delta = idle - prev_idle
-            busy_delta = max(0, total_delta - idle_delta)
-            pct = (busy_delta / total_delta) * 100.0 if total_delta > 0 else 0.0
-            return {"ok": True, "percent": round(pct, 2), "sample": "delta"}
-        except Exception as e:
-            return {"ok": False, "error": str(e), "percent": None}
-
-    @staticmethod
-    def _read_host_memory() -> Dict[str, Any]:
-        try:
-            raw: Dict[str, int] = {}
-            for line in Path('/proc/meminfo').read_text().splitlines():
-                if ':' not in line:
-                    continue
-                k, v = line.split(':', 1)
-                m = re.search(r"(\d+)", v)
-                if m:
-                    raw[k.strip()] = int(m.group(1)) * 1024
-
-            total = int(raw.get('MemTotal') or 0)
-            available = int(raw.get('MemAvailable') or 0)
-            cached = int(raw.get('Cached') or 0) + int(raw.get('Buffers') or 0)
-            if total <= 0:
-                return {"ok": False, "error": "MemTotal missing"}
-
-            used = max(0, total - available)
-            pct = (used / total) * 100.0 if total > 0 else 0.0
-            return {
-                "ok": True,
-                "total_bytes": total,
-                "used_bytes": used,
-                "available_bytes": available,
-                "cached_bytes": cached,
-                "used_percent": round(pct, 2),
-            }
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-
-    @staticmethod
-    def _read_host_loadavg() -> Dict[str, Any]:
-        try:
-            one, five, fifteen = os.getloadavg()
-            return {"ok": True, "one": round(one, 2), "five": round(five, 2), "fifteen": round(fifteen, 2)}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-
-    def _container_info_dict(self, name: str, now: dt.datetime) -> Dict[str, Any]:
-        info = self.get_container_info(name)
-        if not info:
-            return {"name": name, "present": False}
-
-        created_dt = self._parse_docker_ts(info.created_at)
-        started_dt = self._parse_docker_ts(info.started_at)
-
-        age_s = int((now - created_dt).total_seconds()) if created_dt else None
-        uptime_s = int((now - started_dt).total_seconds()) if started_dt else None
+            image = str(config.get("Image") or "")
 
         return {
             "present": True,
-            "name": info.name,
-            "id": info.id,
-            "image": info.image,
-            "status": info.status,
-            "health": info.health,
-            "created_at": info.created_at,
-            "started_at": info.started_at,
+            "name": name,
+            "id": getattr(c, "short_id", None),
+            "image": image,
+            "status": state.get("Status") or getattr(c, "status", None),
+            "created_at": created,
+            "started_at": started,
+            "running": bool(state.get("Running")),
+            "restarting": bool(state.get("Restarting")),
+            "paused": bool(state.get("Paused")),
+            "dead": bool(state.get("Dead")),
+            "health": health,
             "age_s": age_s,
             "uptime_s": uptime_s,
         }
 
-    @staticmethod
-    def _parse_docker_ts(ts: Optional[str]) -> Optional[dt.datetime]:
-        if not ts:
-            return None
+    def runtime_summary(self, engine_container: str, scheduler_container: str) -> Dict[str, Any]:
         try:
-            if ts.endswith("Z"):
-                ts = ts[:-1] + "+00:00"
-            if "." in ts:
-                head, tail = ts.split(".", 1)
-                frac = re.findall(r"^\d+", tail)
-                if frac:
-                    frac_digits = frac[0][:6].ljust(6, "0")
-                    rest = tail[len(frac[0]) :]
-                    ts = f"{head}.{frac_digits}{rest}"
-            return dt.datetime.fromisoformat(ts)
+            self.client.ping()
+            docker_ping = True
+        except Exception:
+            docker_ping = False
+
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+
+        return {
+            "now_utc": now,
+            "docker_ping": docker_ping,
+            "engine": self.inspect_container(engine_container),
+            "scheduler": self.inspect_container(scheduler_container),
+        }
+
+    # ----------------------- Logs -----------------------
+
+    def tail_logs(self, name: str, tail: int = 400) -> str:
+        c = self._get_container(name)
+        if c is None:
+            return f"[control] container not found: {name}"
+        try:
+            raw = c.logs(tail=tail, stdout=True, stderr=True, timestamps=True)
+            if isinstance(raw, bytes):
+                return raw.decode("utf-8", errors="replace")
+            return str(raw)
+        except Exception as e:
+            return f"[control] log read error for {name}: {e}"
+
+    # ----------------------- Host resources -----------------------
+
+    @staticmethod
+    def _read_proc_stat() -> Optional[Tuple[int, int]]:
+        try:
+            with open("/proc/stat", "r", encoding="utf-8") as f:
+                line = f.readline().strip()
+            if not line.startswith("cpu "):
+                return None
+            parts = [int(x) for x in line.split()[1:]]
+            if len(parts) < 4:
+                return None
+            idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
+            total = sum(parts)
+            return total, idle
         except Exception:
             return None
 
-    @staticmethod
-    def _parse_sched_ts(ts: str) -> Optional[dt.datetime]:
-        try:
-            return dt.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S,%f")
-        except Exception:
+    def _sample_host_cpu_percent(self) -> Optional[float]:
+        snap1 = self._read_proc_stat()
+        if snap1 is None:
             return None
 
-    @staticmethod
-    def _dedupe_keep_order(items: List[str]) -> List[str]:
-        seen = set()
-        out: List[str] = []
-        for x in items:
-            if x in seen:
-                continue
-            seen.add(x)
-            out.append(x)
-        return out
+        prev_total = self._host_cpu_prev_total
+        prev_idle = self._host_cpu_prev_idle
 
-    # ----------------------- Normalization helpers -----------------------
+        self._host_cpu_prev_total, self._host_cpu_prev_idle = snap1
 
-    @staticmethod
-    def normalize_title(s: str) -> str:
-        if not s:
-            return ""
-        s = s.strip()
-        s = os.path.basename(s)
-        s = re.sub(r"\.(mp3|wav|flac|ogg|m4a|aac)$", "", s, flags=re.IGNORECASE)
-        s = s.replace("_-_", " - ")
-        s = s.replace("_", " ")
-        s = re.sub(r"\s+", " ", s).strip().lower()
-        return s
+        if prev_total is None or prev_idle is None:
+            time.sleep(0.08)
+            snap2 = self._read_proc_stat()
+            if snap2 is None:
+                return None
+            totald = snap2[0] - snap1[0]
+            idled = snap2[1] - snap1[1]
+            if totald <= 0:
+                return None
+            return round(100.0 * (1.0 - (idled / totald)), 2)
+
+        totald = snap1[0] - prev_total
+        idled = snap1[1] - prev_idle
+        if totald <= 0:
+            return None
+        return round(100.0 * (1.0 - (idled / totald)), 2)
 
     @staticmethod
-    def display_title(s: str) -> str:
-        if not s:
-            return ""
-        s = s.strip()
-        s = os.path.basename(s)
-        s = re.sub(r"\.(mp3|wav|flac|ogg|m4a|aac)$", "", s, flags=re.IGNORECASE)
-        s = s.replace("_-_", " - ")
-        s = s.replace("_", " ")
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
+    def _read_loadavg() -> Dict[str, Optional[float]]:
+        try:
+            one, five, fifteen = os.getloadavg()
+            return {
+                "one": round(float(one), 2),
+                "five": round(float(five), 2),
+                "fifteen": round(float(fifteen), 2),
+            }
+        except Exception:
+            return {"one": None, "five": None, "fifteen": None}
+
+    @staticmethod
+    def _read_meminfo() -> Dict[str, Optional[int]]:
+        data: Dict[str, int] = {}
+        try:
+            with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                for line in f:
+                    if ":" not in line:
+                        continue
+                    k, v = line.split(":", 1)
+                    raw = v.strip().split()[0]
+                    data[k] = int(raw) * 1024
+        except Exception:
+            return {
+                "total_bytes": None,
+                "available_bytes": None,
+                "used_bytes": None,
+                "cached_bytes": None,
+                "used_percent": None,
+            }
+
+        total = data.get("MemTotal")
+        available = data.get("MemAvailable")
+        cached = data.get("Cached", 0) + data.get("Buffers", 0)
+        used = None
+        used_percent = None
+        if total is not None and available is not None:
+            used = max(total - available, 0)
+            if total > 0:
+                used_percent = round((used / total) * 100.0, 2)
+
+        return {
+            "total_bytes": total,
+            "available_bytes": available,
+            "used_bytes": used,
+            "cached_bytes": cached,
+            "used_percent": used_percent,
+        }
+
+    def host_resources_summary(self) -> Dict[str, Any]:
+        return {
+            "ok": True,
+            "source": "host_procfs",
+            "now_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "cpu": {
+                "percent": self._sample_host_cpu_percent(),
+                "sample": "proc/stat",
+            },
+            "memory": self._read_meminfo(),
+            "loadavg": self._read_loadavg(),
+        }
+
+    # ----------------------- Title normalization / display -----------------------
 
     @staticmethod
     def _coerce_rel_title(rel: str) -> Optional[str]:
         s = (rel or "").strip()
         if not s:
             return None
-        return DockerClient.display_title(os.path.basename(s)) or None
+        s = os.path.basename(s)
+        s = DockerClient._RE_EXT.sub("", s).strip()
+        s = s.replace("_-_", " - ")
+        s = s.replace("_", " ")
+        s = re.sub(r"\s+", " ", s).strip()
+        return s or None
 
     @staticmethod
-    def _bpm_or_none(v: Any) -> Optional[float]:
+    def display_title(s: str) -> str:
+        t = (s or "").strip()
+        if not t:
+            return ""
+        t = os.path.basename(t)
+        t = DockerClient._RE_EXT.sub("", t).strip()
+        t = t.replace("_-_", " - ")
+        t = t.replace("_", " ")
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    @staticmethod
+    def normalize_title(s: str) -> str:
+        t = DockerClient.display_title(s).lower().strip()
+        t = re.sub(r"\[[^\]]*\]", "", t)
+        t = re.sub(r"\([^)]*\)", "", t)
+        t = re.sub(r"[^a-z0-9]+", "", t)
+        return t
+
+    @staticmethod
+    def _dedupe_keep_order(items: List[str]) -> List[str]:
+        out: List[str] = []
+        seen: set[str] = set()
+        for x in items:
+            n = DockerClient.normalize_title(x)
+            if not n or n in seen:
+                continue
+            seen.add(n)
+            out.append(DockerClient.display_title(x))
+        return out
+
+    # ----------------------- Playback parsing -----------------------
+
+    @staticmethod
+    def _playback_title_from_uri(raw: str) -> Optional[str]:
+        if not raw:
+            return None
         try:
-            x = float(v)
+            parsed = urllib.parse.urlparse(raw)
+            path = urllib.parse.unquote(parsed.path or "")
         except Exception:
-            return None
-        return round(x, 2) if x >= 0 else None
-
-    @staticmethod
-    def _norm_or_empty(v: Optional[str]) -> str:
-        return DockerClient.normalize_title(v or "")
-
-    @staticmethod
-    def _playback_title_from_uri(uri: str) -> Optional[str]:
-        s = (uri or "").strip()
-        if not s:
-            return None
-        s = re.sub(r"\|.*$", "", s).strip()
-        if s.startswith("file://"):
-            s = s[7:]
-        s = urllib.parse.unquote(s)
-        name = os.path.basename(s)
-        if not name:
-            return None
-        if name.lower() == "azurmixd_silence.mp3":
-            return None
-        return DockerClient.display_title(name) or None
+            path = raw
+        return DockerClient._coerce_rel_title(path)
 
     @classmethod
-    def _playback_stage_from_uri(cls, uri: str) -> Dict[str, Optional[str]]:
-        raw = (uri or "").strip()
-        raw = re.sub(r"\|.*$", "", raw).strip()
-        path = raw[7:] if raw.startswith("file://") else raw
-        path = urllib.parse.unquote(path)
+    def _playback_state_from_uri(cls, raw: str) -> Dict[str, Any]:
+        path = ""
+        if raw:
+            try:
+                parsed = urllib.parse.urlparse(raw)
+                path = urllib.parse.unquote(parsed.path or "")
+            except Exception:
+                path = raw
 
-        m = cls._RE_PACK_URI_STAGE.search(path)
-        if m:
-            seg = str(m.group("stage") or "").lower()
+        m_pack = cls._RE_PACK_URI_STAGE.search(path or "")
+        if m_pack:
+            stage = (m_pack.group("stage") or "").lower()
+            pack_id = (m_pack.group("packid") or "").lower() or None
             return {
                 "playback_uri": raw or None,
                 "playback_path": path or None,
-                "playback_stage": f"pack_{seg}",
-                "pack_id": str(m.group("packid") or "") or None,
+                "playback_stage": stage,
+                "pack_id": pack_id,
                 "playback_title": None,
             }
 
@@ -575,106 +570,84 @@ class DockerClient:
                     last_state["decision_ok"] = True
                 continue
 
-            m_aft = self._RE_AFT_SET_URI.search(line)
-            if m_aft:
-                last_playback = self._playback_stage_from_uri(m_aft.group("uri") or "")
-                last_playback["aft_index"] = str(m_aft.group("aft") or "")
+            m_uri = self._RE_AFT_SET_URI.search(line)
+            if m_uri:
+                playback = self._playback_state_from_uri(m_uri.group("uri") or "")
+                playback["aft"] = int(m_uri.group("aft"))
+                last_playback = playback
                 last_playback_idx = idx
+                continue
 
-        if not last_state and not last_playback:
+        if last_state is None:
             return {
                 "ok": False,
                 "source": "engine_logs_tempo_runtime",
                 "engine_container": engine_container,
-                "error": "no tempo runtime state found",
+                "error": "no tempo(select) state found in logs",
                 "current_title": None,
                 "next_title": None,
                 "current_bpm": None,
                 "next_bpm": None,
-                "playback_stage": None,
-                "playback_uri": None,
-                "playback_title": None,
+                "playback_stage": (last_playback or {}).get("playback_stage"),
+                "playback_uri": (last_playback or {}).get("playback_uri"),
+                "playback_title": (last_playback or {}).get("playback_title"),
             }
 
-        result: Dict[str, Any] = {
-            "ok": True,
-            "source": "engine_logs_tempo_runtime",
-            "engine_container": engine_container,
-            "decision_ok": bool((last_state or {}).get("decision_ok")),
-            "fail_open": bool((last_state or {}).get("fail_open")),
-            "current_title": (last_state or {}).get("current_title"),
-            "next_title": (last_state or {}).get("next_title"),
-            "current_bpm": (last_state or {}).get("current_bpm"),
-            "next_bpm": (last_state or {}).get("next_bpm"),
-            "a_src": (last_state or {}).get("a_src"),
-            "b_src": (last_state or {}).get("b_src"),
-            "a_fx": (last_state or {}).get("a_fx"),
-            "b_fx": (last_state or {}).get("b_fx"),
-            "a_tid": (last_state or {}).get("a_tid"),
-            "b_tid": (last_state or {}).get("b_tid"),
-            "raw_meta": (last_state or {}).get("raw_meta"),
-            "playback_stage": (last_playback or {}).get("playback_stage"),
-            "playback_uri": (last_playback or {}).get("playback_uri"),
-            "playback_title": (last_playback or {}).get("playback_title"),
-            "playback_path": (last_playback or {}).get("playback_path"),
-            "pack_id": (last_playback or {}).get("pack_id"),
-            "aft_index": (last_playback or {}).get("aft_index"),
-        }
+        merged = dict(last_state)
 
-        stage = result.get("playback_stage")
-        playback_title = result.get("playback_title")
-        state_after_playback = last_state_idx > last_playback_idx
-        current_norm = self._norm_or_empty(result.get("current_title"))
-        next_norm = self._norm_or_empty(result.get("next_title"))
-        playback_norm = self._norm_or_empty(playback_title)
+        if last_playback and last_playback_idx >= last_state_idx:
+            merged.update(
+                {
+                    "playback_stage": last_playback.get("playback_stage"),
+                    "playback_uri": last_playback.get("playback_uri"),
+                    "playback_path": last_playback.get("playback_path"),
+                    "playback_title": last_playback.get("playback_title"),
+                    "playback_pack_id": last_playback.get("pack_id"),
+                    "playback_aft": last_playback.get("aft"),
+                }
+            )
+        else:
+            merged.update(
+                {
+                    "playback_stage": None,
+                    "playback_uri": None,
+                    "playback_path": None,
+                    "playback_title": None,
+                    "playback_pack_id": None,
+                    "playback_aft": None,
+                }
+            )
 
-        if stage == "pack_b":
-            if state_after_playback:
-                return result
-            if result.get("next_title"):
-                result["current_title"] = result.get("next_title")
-                result["current_bpm"] = result.get("next_bpm")
-            result["next_title"] = None
-            result["next_bpm"] = None
-            return result
+        return merged
 
-        if stage in {"pack_a", "pack_bridge"}:
-            return result
-
-        if stage == "direct" and playback_title:
-            result["current_title"] = playback_title
-
-            if playback_norm and current_norm == playback_norm:
-                return result
-
-            if playback_norm and next_norm == playback_norm:
-                result["current_bpm"] = result.get("next_bpm")
-                result["next_title"] = None
-                result["next_bpm"] = None
-                return result
-
-            if not state_after_playback:
-                result["current_bpm"] = None
-                result["next_title"] = None
-                result["next_bpm"] = None
-                return result
-
-            if playback_norm and current_norm != playback_norm:
-                result["current_bpm"] = None
-                result["next_title"] = None
-                result["next_bpm"] = None
-            return result
-
-        return result
-
-    @classmethod
-    def _extract_log_ts_raw(cls, line: str) -> str:
-        m = cls._RE_LOG_TS.match(line or "")
-        return str(m.group("ts") or "") if m else ""
+    # ----------------------- tempo(select) accepted entries -----------------------
 
     @staticmethod
-    def _extract_float_from_line(pattern: re.Pattern[str], line: str) -> Optional[float]:
-        m = pattern.search(line or "")
+    def _parse_sched_ts(v: str) -> Optional[dt.datetime]:
+        s = (v or "").strip()
+        if not s:
+            return None
+        try:
+            return dt.datetime.strptime(s, "%Y-%m-%d %H:%M:%S,%f")
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_log_ts_raw(line: str) -> Optional[str]:
+        m = DockerClient._RE_LOG_TS.search(line or "")
+        return (m.group("ts") or "").strip() or None if m else None
+
+    @staticmethod
+    def _bpm_or_none(v: Any) -> Optional[float]:
+        try:
+            f = float(v)
+            return round(f, 2) if f > 0 else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_float_from_line(rx: re.Pattern[str], line: str) -> Optional[float]:
+        m = rx.search(line or "")
         if not m:
             return None
         try:
@@ -779,26 +752,42 @@ class DockerClient:
                 "source": "engine_logs_tempo_accept",
             }
 
-        start_idx: Optional[int] = None
-        current_title_found = False
+        if not cur_norm:
+            return {
+                "ok": True,
+                "source": "engine_logs_tempo_accept_waiting_for_current",
+                "current_title_found": False,
+                "current_title": current_title,
+                "upcoming": [],
+                "entries_considered": 0,
+            }
 
-        if cur_norm:
+        start_idx: Optional[int] = None
+
+        for i in range(len(raw_entries) - 1, -1, -1):
+            entry = raw_entries[i] or {}
+            if (entry.get("a_norm") or "") == cur_norm:
+                start_idx = i
+                break
+
+        if start_idx is None:
             for i in range(len(raw_entries) - 1, -1, -1):
                 entry = raw_entries[i] or {}
-                if (entry.get("a_norm") or "") == cur_norm:
-                    start_idx = i
-                    current_title_found = True
+                if (entry.get("b_norm") or "") == cur_norm:
+                    start_idx = i + 1
                     break
 
-            if start_idx is None:
-                for i in range(len(raw_entries) - 1, -1, -1):
-                    entry = raw_entries[i] or {}
-                    if (entry.get("b_norm") or "") == cur_norm:
-                        start_idx = i + 1
-                        current_title_found = True
-                        break
+        if start_idx is None:
+            return {
+                "ok": True,
+                "source": "engine_logs_tempo_accept_unanchored",
+                "current_title_found": False,
+                "current_title": current_title,
+                "upcoming": [],
+                "entries_considered": 0,
+            }
 
-        seq = raw_entries[start_idx:] if start_idx is not None else raw_entries[-(n * 8):]
+        seq = raw_entries[start_idx:]
 
         seen: set[str] = set()
         out: List[Dict[str, Any]] = []
@@ -824,8 +813,8 @@ class DockerClient:
 
         return {
             "ok": True,
-            "source": "engine_logs_tempo_accept_after_current" if current_title_found else "engine_logs_tempo_accept_fallback_tail",
-            "current_title_found": current_title_found,
+            "source": "engine_logs_tempo_accept_after_current",
+            "current_title_found": True,
             "current_title": current_title,
             "upcoming": out,
             "entries_considered": len(seq),
@@ -885,7 +874,7 @@ class DockerClient:
                             break
 
                 if start_idx is None:
-                    chunk = self._dedupe_keep_order(tempo_titles[-(n * 4) :])
+                    chunk = self._dedupe_keep_order(tempo_titles[-(n * 4):])
                     return {
                         "ok": True,
                         "source": "engine_logs_tempo_fallback_tail",
@@ -921,7 +910,7 @@ class DockerClient:
                     break
 
         if start_idx is None:
-            chunk = self._dedupe_keep_order(titles[-(n * 4) :])
+            chunk = self._dedupe_keep_order(titles[-(n * 4):])
             return {
                 "ok": True,
                 "source": "engine_logs_preprocess_fallback_tail",
@@ -1011,7 +1000,7 @@ class DockerClient:
                     start_idx = i + 1
                     break
 
-        seq = raw_entries[start_idx:] if start_idx is not None else raw_entries[-(n * 8) :]
+        seq = raw_entries[start_idx:] if start_idx is not None else raw_entries[-(n * 8):]
 
         seen: set[str] = set()
         out: List[Dict[str, Any]] = []
