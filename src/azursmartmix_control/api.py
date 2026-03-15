@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -17,6 +17,13 @@ from azursmartmix_control.compose_reader import (
     set_env_in_host_envfile,
 )
 from azursmartmix_control.icecast_client import IcecastClient
+
+
+_NOCACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
 
 def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
@@ -83,10 +90,7 @@ def _build_image_ref(settings: Settings, tag: Optional[str]) -> str:
 
 
 class ComposeEnvSaveRequest(BaseModel):
-    # UI envoie un dict KEY->VALUE
     environment: Dict[str, str] = Field(default_factory=dict)
-
-    # legacy field (compose env could be dict/list). Kept for compatibility with existing UI payloads.
     env_format_prefer: str = Field(default="dict", description="dict|list (legacy, ignored for env_file)")
 
 
@@ -114,6 +118,153 @@ def create_api(settings: Settings) -> FastAPI:
         mount=settings.icecast_mount,
     )
 
+    def _json_nocache(data: Dict[str, Any]) -> JSONResponse:
+        return JSONResponse(data, headers=_NOCACHE_HEADERS)
+
+    def _text_nocache(text: str) -> PlainTextResponse:
+        return PlainTextResponse(text, headers=_NOCACHE_HEADERS)
+
+    def _panel_resources_payload() -> Dict[str, Any]:
+        raw = docker_client.host_resources_summary()
+        return {
+            "ok": bool(raw.get("ok")),
+            "now_utc": raw.get("now_utc"),
+            "source": raw.get("source"),
+            "cpu": raw.get("cpu") or {},
+            "memory": raw.get("memory") or {},
+            "loadavg": raw.get("loadavg") or {},
+        }
+
+    def _panel_runtime_payload() -> Dict[str, Any]:
+        raw = docker_client.runtime_summary(settings.engine_container, settings.scheduler_container)
+
+        eng = raw.get("engine") or {}
+        sch = raw.get("scheduler") or {}
+
+        def pack(x: Dict[str, Any]) -> Dict[str, Any]:
+            if not x.get("present"):
+                return {"present": False, "name": x.get("name"), "status": "missing"}
+            return {
+                "present": True,
+                "name": x.get("name"),
+                "image": x.get("image"),
+                "status": x.get("status"),
+                "health": x.get("health"),
+                "uptime": _fmt_duration(x.get("uptime_s")),
+                "age": _fmt_duration(x.get("age_s")),
+            }
+
+        return {
+            "now_utc": raw.get("now_utc"),
+            "docker_ping": raw.get("docker_ping"),
+            "engine": pack(eng),
+            "scheduler": pack(sch),
+        }
+
+    async def _resolve_now_and_upcoming(upcoming_n: int) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        ic = await ice.now_playing()
+        icecast_title = None
+        if isinstance(ic, dict) and ic.get("ok"):
+            icecast_title = _display_title_or_none(ic.get("title") or (ic.get("raw") or {}).get("title"))
+
+        tempo_runtime = docker_client.extract_tempo_runtime_state(
+            engine_container=settings.engine_container,
+            tail=2500,
+        )
+        runtime_title = None
+        if isinstance(tempo_runtime, dict) and tempo_runtime.get("ok"):
+            runtime_title = _display_title_or_none(tempo_runtime.get("current_title"))
+
+        current_title = icecast_title or runtime_title
+        now_source = "icecast_metadata" if icecast_title else ("engine_tempo_runtime" if runtime_title else None)
+
+        upcoming_tempo = docker_client.compute_upcoming_from_tempo_accepts(
+            engine_container=settings.engine_container,
+            current_title=current_title,
+            n=max(12, upcoming_n + 2),
+            tail=3000,
+        )
+        tempo_items = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else None
+        if not isinstance(tempo_items, list):
+            tempo_items = []
+
+        upcoming_sched = docker_client.compute_upcoming_from_scheduler_next(
+            scheduler_container=settings.scheduler_container,
+            current_title=current_title,
+            n=max(12, upcoming_n + 2),
+            tail=3000,
+        )
+        sched_items = upcoming_sched.get("upcoming") if isinstance(upcoming_sched, dict) else None
+        if not isinstance(sched_items, list):
+            sched_items = []
+
+        pl_observed = docker_client.infer_playlist_for_title_from_scheduler(
+            scheduler_container=settings.scheduler_container,
+            current_title=current_title,
+            tail=3000,
+        )
+        playlist_effective = pl_observed.get("playlist") if isinstance(pl_observed, dict) else None
+
+        predicted_next = None
+        if tempo_items:
+            predicted_next = tempo_items[0]
+        elif sched_items:
+            predicted_next = sched_items[0]
+
+        ss = docker_client.last_engine_stream_start(
+            engine_container=settings.engine_container,
+            tail=1000,
+            recent_window_s=12,
+        )
+
+        using_tempo = bool(tempo_items)
+        chosen = (tempo_items if using_tempo else sched_items)[:upcoming_n]
+
+        now_payload = {
+            "ok": bool(current_title),
+            "mount": settings.icecast_mount,
+            "source": "icecast(metadata)+engine_tempo(select)+scheduler(NEXT)+engine(STREAM_START)",
+            "now_source": now_source,
+            "title_effective": current_title,
+            "playlist_effective": playlist_effective,
+            "title_observed": icecast_title,
+            "title_runtime": runtime_title,
+            "playlist_observed": playlist_effective,
+            "scheduler_match_observed": pl_observed.get("match") if isinstance(pl_observed, dict) else None,
+            "engine_stream_start": ss,
+            "tempo_runtime": tempo_runtime,
+            "predicted_next": predicted_next,
+            "debug": {
+                "upcoming_primary_source": upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None,
+                "upcoming_secondary_source": upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None,
+                "tempo_upcoming_count": len(tempo_items),
+                "scheduler_upcoming_count": len(sched_items),
+            },
+        }
+
+        upcoming_payload = {
+            "ok": True,
+            "current_title_observed": current_title,
+            "source": {
+                "primary": (
+                    upcoming_tempo.get("source")
+                    if using_tempo and isinstance(upcoming_tempo, dict)
+                    else (upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None)
+                ),
+                "secondary": upcoming_sched.get("source") if using_tempo and isinstance(upcoming_sched, dict) else None,
+            },
+            "upcoming": chosen,
+            "debug": {
+                "title_source": now_source,
+                "tempo_runtime": tempo_runtime,
+                "tempo_accept": upcoming_tempo,
+                "scheduler": upcoming_sched,
+                "used_source": "tempo_accept" if using_tempo else "scheduler",
+            },
+        }
+
+        return now_payload, upcoming_payload
+
     @app.get("/health")
     def health() -> Dict[str, Any]:
         return {"ok": True}
@@ -122,11 +273,11 @@ def create_api(settings: Settings) -> FastAPI:
     def status() -> Dict[str, Any]:
         return docker_client.runtime_summary(settings.engine_container, settings.scheduler_container)
 
-    @app.get("/logs", response_class=PlainTextResponse)
+    @app.get("/logs")
     def logs(
         service: str = Query(..., description="engine|scheduler|<container_name>"),
         tail: int = Query(0, description="lines to tail (0 = default)"),
-    ) -> str:
+    ) -> PlainTextResponse:
         tail_eff = tail if tail > 0 else settings.log_tail_lines_default
         tail_eff = max(1, min(tail_eff, settings.log_tail_lines_max))
 
@@ -137,9 +288,7 @@ def create_api(settings: Settings) -> FastAPI:
         else:
             name = service
 
-        return docker_client.tail_logs(name=name, tail=tail_eff)
-
-    # ------------------- Compose control endpoints -------------------
+        return _text_nocache(docker_client.tail_logs(name=name, tail=tail_eff))
 
     @app.post("/ops/compose/down", response_class=PlainTextResponse)
     def ops_compose_down() -> str:
@@ -179,14 +328,9 @@ def create_api(settings: Settings) -> FastAPI:
         lines.append(f"overall_ok: {bool(r.get('ok'))}")
         return "\n".join(lines).strip() + "\n"
 
-    # ------------------- Settings editor (env_file on host) -------------------
-    # API contract remains the same: /compose/engine_env
-    # Implementation: read/write /var/azuramix/azuramix.env only.
-
     @app.get("/compose/engine_env")
     def compose_engine_env() -> Dict[str, Any]:
         data = get_env_from_host_envfile(settings.azuramix_env_file)
-        # keep UI stable: pretend this is "engine env"
         data["service"] = settings.compose_service_engine
         data["restart_required"] = False
         return data
@@ -202,58 +346,22 @@ def create_api(settings: Settings) -> FastAPI:
         r["message"] = "Saved to azuramix.env. Need to restart (docker compose up -d) to take effect."
         return r
 
-    # ------------------- Existing endpoints -------------------
-
     @app.get("/scheduler/upcoming")
     async def scheduler_upcoming(n: int = Query(10, ge=1, le=50)) -> JSONResponse:
         data = await sched.upcoming(n=n)
-        return JSONResponse(data)
+        return JSONResponse(data, headers=_NOCACHE_HEADERS)
 
     @app.get("/panel/engine_env")
     def panel_engine_env() -> Dict[str, Any]:
-        # legacy: read-only view from mounted compose file inside container
         return get_service_env(settings.compose_path, settings.compose_service_engine)
 
     @app.get("/panel/resources")
-    def panel_resources() -> Dict[str, Any]:
-        raw = docker_client.host_resources_summary()
-        return {
-            "ok": bool(raw.get("ok")),
-            "now_utc": raw.get("now_utc"),
-            "source": raw.get("source"),
-            "cpu": raw.get("cpu") or {},
-            "memory": raw.get("memory") or {},
-            "loadavg": raw.get("loadavg") or {},
-        }
+    def panel_resources() -> JSONResponse:
+        return _json_nocache(_panel_resources_payload())
 
     @app.get("/panel/runtime")
-    def panel_runtime() -> Dict[str, Any]:
-        raw = docker_client.runtime_summary(settings.engine_container, settings.scheduler_container)
-
-        eng = raw.get("engine") or {}
-        sch = raw.get("scheduler") or {}
-
-        def pack(x: Dict[str, Any]) -> Dict[str, Any]:
-            if not x.get("present"):
-                return {"present": False, "name": x.get("name"), "status": "missing"}
-            return {
-                "present": True,
-                "name": x.get("name"),
-                "image": x.get("image"),
-                "status": x.get("status"),
-                "health": x.get("health"),
-                "uptime": _fmt_duration(x.get("uptime_s")),
-                "age": _fmt_duration(x.get("age_s")),
-            }
-
-        return {
-            "now_utc": raw.get("now_utc"),
-            "docker_ping": raw.get("docker_ping"),
-            "engine": pack(eng),
-            "scheduler": pack(sch),
-        }
-
-    # --- (tout le reste de ton API existante inchangée) ---
+    def panel_runtime() -> JSONResponse:
+        return _json_nocache(_panel_runtime_payload())
 
     def _engine_titles_to_upcoming_entries(
         titles: List[str],
@@ -327,135 +435,38 @@ def create_api(settings: Settings) -> FastAPI:
         }
 
     @app.get("/panel/now")
-    async def panel_now() -> Dict[str, Any]:
-        ic = await ice.now_playing()
-        icecast_title = None
-        if isinstance(ic, dict) and ic.get("ok"):
-            icecast_title = _display_title_or_none(ic.get("title") or (ic.get("raw") or {}).get("title"))
-
-        tempo_runtime = docker_client.extract_tempo_runtime_state(
-            engine_container=settings.engine_container,
-            tail=2500,
-        )
-        runtime_title = None
-        if isinstance(tempo_runtime, dict) and tempo_runtime.get("ok"):
-            runtime_title = _display_title_or_none(tempo_runtime.get("current_title"))
-
-        title_effective = icecast_title or runtime_title
-        now_source = "icecast_metadata" if icecast_title else ("engine_tempo_runtime" if runtime_title else None)
-
-        upcoming_tempo = docker_client.compute_upcoming_from_tempo_accepts(
-            engine_container=settings.engine_container,
-            current_title=title_effective,
-            n=6,
-            tail=3000,
-        )
-        upcoming_sched = docker_client.compute_upcoming_from_scheduler_next(
-            scheduler_container=settings.scheduler_container,
-            current_title=title_effective,
-            n=12,
-            tail=3000,
-        )
-
-        pl_observed = docker_client.infer_playlist_for_title_from_scheduler(
-            scheduler_container=settings.scheduler_container,
-            current_title=title_effective,
-            tail=3000,
-        )
-        playlist_effective = pl_observed.get("playlist") if isinstance(pl_observed, dict) else None
-
-        predicted_next = None
-        tempo_items = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else None
-        if isinstance(tempo_items, list) and tempo_items:
-            predicted_next = tempo_items[0]
-        else:
-            sched_items = upcoming_sched.get("upcoming") if isinstance(upcoming_sched, dict) else None
-            if isinstance(sched_items, list) and sched_items:
-                predicted_next = sched_items[0]
-
-        ss = docker_client.last_engine_stream_start(
-            engine_container=settings.engine_container,
-            tail=1000,
-            recent_window_s=12,
-        )
-
-        return {
-            "ok": bool(title_effective),
-            "mount": settings.icecast_mount,
-            "source": "icecast(metadata)+engine_tempo(select)+scheduler(NEXT)+engine(STREAM_START)",
-            "now_source": now_source,
-            "title_effective": title_effective,
-            "playlist_effective": playlist_effective,
-            "title_observed": icecast_title,
-            "title_runtime": runtime_title,
-            "playlist_observed": playlist_effective,
-            "scheduler_match_observed": pl_observed.get("match") if isinstance(pl_observed, dict) else None,
-            "engine_stream_start": ss,
-            "tempo_runtime": tempo_runtime,
-            "predicted_next": predicted_next,
-            "debug": {
-                "upcoming_primary_source": upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None,
-                "upcoming_secondary_source": upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None,
-                "tempo_upcoming_count": len(tempo_items or []) if isinstance(tempo_items, list) else 0,
-                "scheduler_upcoming_count": len((upcoming_sched.get("upcoming") or [])) if isinstance(upcoming_sched, dict) else 0,
-            },
-        }
+    async def panel_now() -> JSONResponse:
+        now_payload, _ = await _resolve_now_and_upcoming(upcoming_n=10)
+        return _json_nocache(now_payload)
 
     @app.get("/panel/upcoming")
-    async def panel_upcoming(n: int = Query(10, ge=1, le=30)) -> Dict[str, Any]:
-        ic = await ice.now_playing()
-        icecast_title = None
-        if isinstance(ic, dict) and ic.get("ok"):
-            icecast_title = _display_title_or_none(ic.get("title") or (ic.get("raw") or {}).get("title"))
+    async def panel_upcoming(n: int = Query(10, ge=1, le=30)) -> JSONResponse:
+        _, upcoming_payload = await _resolve_now_and_upcoming(upcoming_n=n)
+        return _json_nocache(upcoming_payload)
 
-        tempo_runtime = docker_client.extract_tempo_runtime_state(
-            engine_container=settings.engine_container,
-            tail=2500,
-        )
-        runtime_title = None
-        if isinstance(tempo_runtime, dict) and tempo_runtime.get("ok"):
-            runtime_title = _display_title_or_none(tempo_runtime.get("current_title"))
+    @app.get("/panel/dashboard")
+    async def panel_dashboard(
+        upcoming_n: int = Query(10, ge=1, le=30),
+        include_logs: bool = Query(False),
+        engine_log_tail: int = Query(200, ge=1, le=2000),
+        scheduler_log_tail: int = Query(200, ge=1, le=2000),
+    ) -> JSONResponse:
+        now_payload, upcoming_payload = await _resolve_now_and_upcoming(upcoming_n=upcoming_n)
 
-        current_title = icecast_title or runtime_title
-
-        upcoming_tempo = docker_client.compute_upcoming_from_tempo_accepts(
-            engine_container=settings.engine_container,
-            current_title=current_title,
-            n=max(12, n + 2),
-            tail=3000,
-        )
-        tempo_items = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else None
-        if not isinstance(tempo_items, list):
-            tempo_items = []
-
-        upcoming_sched = docker_client.compute_upcoming_from_scheduler_next(
-            scheduler_container=settings.scheduler_container,
-            current_title=current_title,
-            n=max(12, n + 2),
-            tail=3000,
-        )
-        sched_items = upcoming_sched.get("upcoming") if isinstance(upcoming_sched, dict) else None
-        if not isinstance(sched_items, list):
-            sched_items = []
-
-        using_tempo = bool(tempo_items)
-        chosen = (tempo_items if using_tempo else sched_items)[:n]
-
-        return {
+        payload: Dict[str, Any] = {
             "ok": True,
-            "current_title_observed": current_title,
-            "source": {
-                "primary": upcoming_tempo.get("source") if using_tempo and isinstance(upcoming_tempo, dict) else (upcoming_sched.get("source") if isinstance(upcoming_sched, dict) else None),
-                "secondary": upcoming_sched.get("source") if using_tempo and isinstance(upcoming_sched, dict) else None,
-            },
-            "upcoming": chosen,
-            "debug": {
-                "title_source": "icecast_metadata" if icecast_title else ("engine_tempo_runtime" if runtime_title else None),
-                "tempo_runtime": tempo_runtime,
-                "tempo_accept": upcoming_tempo,
-                "scheduler": upcoming_sched,
-                "used_source": "tempo_accept" if using_tempo else "scheduler",
-            },
+            "resources": _panel_resources_payload(),
+            "runtime": _panel_runtime_payload(),
+            "now": now_payload,
+            "upcoming": upcoming_payload,
         }
+
+        if include_logs:
+            payload["logs"] = {
+                "engine": docker_client.tail_logs(name=settings.engine_container, tail=engine_log_tail),
+                "scheduler": docker_client.tail_logs(name=settings.scheduler_container, tail=scheduler_log_tail),
+            }
+
+        return _json_nocache(payload)
 
     return app
