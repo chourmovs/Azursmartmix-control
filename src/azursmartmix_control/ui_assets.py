@@ -515,6 +515,14 @@ document.addEventListener('click', (ev) => {
       .replaceAll("'", '&#39;');
   }
 
+  const API_BASE = String(window.azApiBase || '/api').replace(/\/+$/, '');
+
+  function apiUrl(path){
+    const p = String(path || '');
+    if (!p) return API_BASE;
+    return p.startsWith('/') ? (API_BASE + p) : (API_BASE + '/' + p);
+  }
+
   function setHTML(id, html){
     const el = document.getElementById(id);
     if (el) el.innerHTML = html;
@@ -690,10 +698,10 @@ document.addEventListener('click', (ev) => {
 
     setText('np_title', now?.title_effective || now?.title_observed || '—');
     setHTML('np_meta', nowMetaHTML(now));
-    setText('np_sources', 'Sources: ' + String(now?.source || 'Icecast metadata + engine tempo(select)').trim());
+    setText('np_sources', 'Sources: ' + String(now?.source || 'Icecast metadata only').trim());
 
     const upSource = upcoming && typeof upcoming.source === 'object' ? upcoming.source.primary : null;
-    setText('up_source', String(upSource || 'from engine tempo(select) log'));
+    setText('up_source', String(upSource || 'engine_logs_tempo_accept_after_current'));
     setHTML('upcoming_list', upcomingHTML(upcoming?.upcoming || []));
   }
 
@@ -711,8 +719,8 @@ document.addEventListener('click', (ev) => {
     lastOkTs: 0,
   };
 
-  async function fetchJSON(url){
-    const u = url + (url.includes('?') ? '&' : '?') + '_ts=' + Date.now();
+  async function fetchJSON(path){
+    const u = apiUrl(path) + (String(path).includes('?') ? '&' : '?') + '_ts=' + Date.now();
     const r = await fetch(u, {
       method: 'GET',
       cache: 'no-store',
@@ -722,8 +730,8 @@ document.addEventListener('click', (ev) => {
     return await r.json();
   }
 
-  async function fetchText(url){
-    const u = url + (url.includes('?') ? '&' : '?') + '_ts=' + Date.now();
+  async function fetchText(path){
+    const u = apiUrl(path) + (String(path).includes('?') ? '&' : '?') + '_ts=' + Date.now();
     const r = await fetch(u, {
       method: 'GET',
       cache: 'no-store',
@@ -808,8 +816,10 @@ document.addEventListener('click', (ev) => {
     state.running = true;
     clearTimeout(state.mainTimer);
     clearTimeout(state.logsTimer);
-    mainLoop();
-    logsLoop();
+    state.mainTimer = null;
+    state.logsTimer = null;
+    void mainLoop();
+    void logsLoop();
   }
 
   function stopDashboard(){
@@ -831,23 +841,27 @@ document.addEventListener('click', (ev) => {
   document.addEventListener('visibilitychange', () => {
     if (!state.running) return;
     if (!document.hidden) {
-      refreshMain();
-      refreshLogs();
+      void refreshMain();
+      void refreshLogs();
     }
   });
 
   window.addEventListener('focus', () => {
     if (!state.running) return;
-    refreshMain();
+    void refreshMain();
   });
 
   window.setInterval(() => {
     if (state.running) updateSyncBadge('ok');
   }, 1000);
 
-  window.addEventListener('load', () => {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      startDashboard();
+    }, { once: true });
+  } else {
     startDashboard();
-  });
+  }
 })();
 
 (function(){
