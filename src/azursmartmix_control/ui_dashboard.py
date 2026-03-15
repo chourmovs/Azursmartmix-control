@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 import html
+import uuid
 
 from nicegui import ui
 
@@ -179,13 +180,29 @@ class DashboardMixin:
         )
 
     def _player_html(self, url: str) -> str:
+        player_id = f"az_stream_{uuid.uuid4().hex}"
         u = html.escape(url)
         return (
-            f'<div class="az-player">'
-            f'  <audio controls preload="none" crossorigin="anonymous">'
-            f'    <source src="{u}" type="audio/mpeg" />'
-            f"  </audio>"
-            f'  <div class="hint" data-copy="{u}">{u}</div>'
+            f'<div class="az-stream-player" id="{player_id}" data-stream-url="{u}">'
+            f'  <audio class="az-stream-audio" preload="none" crossorigin="anonymous" playsinline></audio>'
+            f'  <div class="az-stream-top">'
+            f'    <div class="az-stream-live">'
+            f'      <span class="az-live-dot"></span>'
+            f'      <span>LIVE</span>'
+            f'    </div>'
+            f'    <div class="az-stream-state" data-role="state">idle</div>'
+            f'  </div>'
+            f'  <div class="az-stream-controls">'
+            f'    <button type="button" class="az-stream-btn primary" onclick="window.azStreamPlay(\'{player_id}\')">Play</button>'
+            f'    <button type="button" class="az-stream-btn" onclick="window.azStreamStop(\'{player_id}\')">Stop</button>'
+            f'    <button type="button" class="az-stream-btn" onclick="window.azStreamToggleMute(\'{player_id}\')">Mute</button>'
+            f'    <div class="az-stream-volume-wrap">'
+            f'      <span class="az-stream-vol-label">Vol</span>'
+            f'      <input class="az-stream-volume" type="range" min="0" max="100" value="100" '
+            f'        oninput="window.azStreamSetVolume(\'{player_id}\', this.value)" />'
+            f'    </div>'
+            f'  </div>'
+            f'  <div class="az-stream-hint" data-copy="{u}">{u}</div>'
             f"</div>"
         )
 
