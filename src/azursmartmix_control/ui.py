@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import html
+import json
 import urllib.parse
 
 import httpx
@@ -213,6 +214,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
 
     def build(self) -> None:
         ui.add_head_html(f"<style>{AZURA_CSS}</style>")
+        ui.add_head_html(f"<script>window.azApiBase = {json.dumps(self.api_base)};</script>")
         ui.add_head_html(f"<script>{AZURA_JS}</script>")
         ui.page_title("AzurSmartMix Control")
 
