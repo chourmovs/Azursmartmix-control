@@ -17,6 +17,7 @@ from azursmartmix_control.compose_reader import (
     set_env_in_host_envfile,
 )
 from azursmartmix_control.icecast_client import IcecastClient
+from azurmixd.runtime_queue_state import get_state
 
 
 def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
@@ -179,6 +180,11 @@ def create_api(settings: Settings) -> FastAPI:
             "entries_considered": int(data.get("entries_considered") or 0),
         }
 
+
+    @app.get("/runtime/queue")
+    def runtime_queue():
+        return get_state()
+    
     @app.get("/health")
     def health() -> Dict[str, Any]:
         return {"ok": True}
