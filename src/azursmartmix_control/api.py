@@ -180,11 +180,88 @@ def create_api(settings: Settings) -> FastAPI:
             "entries_considered": int(data.get("entries_considered") or 0),
         }
 
+    def _runtime_state() -> Dict[str, Any]:
+        try:
+            data = get_state()
+        except Exception:
+            data = {"now": None, "queue": []}
+        if not isinstance(data, dict):
+            return {"now": None, "queue": []}
+        now = data.get("now")
+        queue = data.get("queue")
+        return {
+            "now": now if isinstance(now, dict) else None,
+            "queue": queue if isinstance(queue, list) else [],
+        }
+
+    def _runtime_entry_to_panel(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not isinstance(entry, dict):
+            return None
+
+        title_raw = str(entry.get("title") or "").strip()
+        path_raw = str(entry.get("path") or "").strip()
+        source_path_raw = str(entry.get("source_path") or "").strip()
+        playlist_raw = str(entry.get("playlist") or "").strip()
+
+        title = _display_title_or_none(title_raw)
+        if not title and source_path_raw:
+            title = _display_title_or_none(os.path.basename(source_path_raw))
+        if not title and path_raw:
+            title = _display_title_or_none(os.path.basename(path_raw))
+        if not title:
+            return None
+
+        bpm = entry.get("bpm")
+        try:
+            bpm = float(bpm) if bpm is not None else None
+        except Exception:
+            bpm = None
+
+        ts = entry.get("ts")
+        try:
+            ts = float(ts) if ts is not None else None
+        except Exception:
+            ts = None
+
+        return {
+            "title": title,
+            "title_display": title,
+            "playlist": playlist_raw or None,
+            "bpm": bpm,
+            "ts": ts,
+            "path": path_raw or None,
+            "source_path": source_path_raw or None,
+        }
+
+    def _runtime_now_panel() -> Optional[Dict[str, Any]]:
+        st = _runtime_state()
+        return _runtime_entry_to_panel(st.get("now") or {})
+
+    def _runtime_queue_panel(limit: int) -> List[Dict[str, Any]]:
+        st = _runtime_state()
+        raw = st.get("queue") or []
+        out: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for item in raw:
+            ent = _runtime_entry_to_panel(item if isinstance(item, dict) else {})
+            if not ent:
+                continue
+            norm = docker_client.normalize_title(str(ent.get("title") or ""))
+            if norm and norm in seen:
+                continue
+            if norm:
+                seen.add(norm)
+            out.append(ent)
+            if len(out) >= limit:
+                break
+
+        return out
 
     @app.get("/runtime/queue")
     def runtime_queue():
         return get_state()
-    
+
     @app.get("/health")
     def health() -> Dict[str, Any]:
         return {"ok": True}
@@ -407,22 +484,37 @@ def create_api(settings: Settings) -> FastAPI:
             tail=2500,
         )
 
-        title_effective = icecast_title
-        now_source = "icecast_metadata" if icecast_title else None
+        runtime_now = _runtime_now_panel()
+        runtime_upcoming = _runtime_queue_panel(limit=6)
+
+        title_effective = runtime_now.get("title") if isinstance(runtime_now, dict) else None
+        now_source = "runtime_queue_state" if title_effective else None
+
+        if not title_effective:
+            title_effective = icecast_title
+            now_source = "icecast_metadata" if icecast_title else None
 
         upcoming_tempo = _strict_tempo_upcoming(current_title=title_effective, n=6)
 
-        pl_observed = docker_client.infer_playlist_for_title_from_scheduler(
-            scheduler_container=settings.scheduler_container,
-            current_title=title_effective,
-            tail=3000,
-        ) if title_effective else {"ok": True, "playlist": None, "match": None}
-        playlist_effective = pl_observed.get("playlist") if isinstance(pl_observed, dict) else None
+        playlist_effective = runtime_now.get("playlist") if isinstance(runtime_now, dict) else None
+        pl_observed = {"ok": True, "playlist": playlist_effective, "match": "runtime_queue_state"} if playlist_effective else (
+            docker_client.infer_playlist_for_title_from_scheduler(
+                scheduler_container=settings.scheduler_container,
+                current_title=title_effective,
+                tail=3000,
+            ) if title_effective else {"ok": True, "playlist": None, "match": None}
+        )
+
+        if not playlist_effective:
+            playlist_effective = pl_observed.get("playlist") if isinstance(pl_observed, dict) else None
 
         predicted_next = None
-        tempo_items = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else None
-        if isinstance(tempo_items, list) and tempo_items:
-            predicted_next = tempo_items[0]
+        if isinstance(runtime_upcoming, list) and runtime_upcoming:
+            predicted_next = runtime_upcoming[0]
+        else:
+            tempo_items = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else None
+            if isinstance(tempo_items, list) and tempo_items:
+                predicted_next = tempo_items[0]
 
         ss = docker_client.last_engine_stream_start(
             engine_container=settings.engine_container,
@@ -430,16 +522,20 @@ def create_api(settings: Settings) -> FastAPI:
             recent_window_s=12,
         )
 
+        tempo_items = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else None
+
         return {
             "ok": bool(title_effective),
             "mount": settings.icecast_mount,
-            "source": "icecast(metadata_only)+engine_tempo(select_ok_after_current)+engine(STREAM_START)",
+            "source": "runtime_queue_state+icecast(metadata_only)+engine_tempo(select_ok_after_current)+engine(STREAM_START)",
             "now_source": now_source,
             "title_effective": title_effective,
             "playlist_effective": playlist_effective,
             "title_observed": icecast_title,
-            "title_runtime": None,
+            "title_runtime": (runtime_now.get("title") if isinstance(runtime_now, dict) else None),
             "playlist_observed": playlist_effective,
+            "playlist_runtime": (runtime_now.get("playlist") if isinstance(runtime_now, dict) else None),
+            "bpm_runtime": (runtime_now.get("bpm") if isinstance(runtime_now, dict) else None),
             "scheduler_match_observed": pl_observed.get("match") if isinstance(pl_observed, dict) else None,
             "engine_stream_start": ss,
             "tempo_runtime": tempo_runtime,
@@ -447,7 +543,13 @@ def create_api(settings: Settings) -> FastAPI:
             "debug": {
                 "icecast_ok": bool(isinstance(ic, dict) and ic.get("ok")),
                 "icecast_error": (ic.get("error") if isinstance(ic, dict) else None),
-                "upcoming_primary_source": upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None,
+                "runtime_now": runtime_now,
+                "runtime_upcoming_count": len(runtime_upcoming or []) if isinstance(runtime_upcoming, list) else 0,
+                "upcoming_primary_source": (
+                    "runtime_queue_state"
+                    if isinstance(runtime_upcoming, list) and runtime_upcoming
+                    else (upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None)
+                ),
                 "tempo_upcoming_count": len(tempo_items or []) if isinstance(tempo_items, list) else 0,
                 "tempo_current_title_found": bool(upcoming_tempo.get("current_title_found")) if isinstance(upcoming_tempo, dict) else False,
             },
@@ -463,28 +565,57 @@ def create_api(settings: Settings) -> FastAPI:
             tail=2500,
         )
 
-        current_title = icecast_title
+        runtime_now = _runtime_now_panel()
+        runtime_queue = _runtime_queue_panel(limit=n)
+
+        current_title = None
+        title_source = None
+
+        if isinstance(runtime_now, dict) and runtime_now.get("title"):
+            current_title = runtime_now.get("title")
+            title_source = "runtime_queue_state"
+        elif icecast_title:
+            current_title = icecast_title
+            title_source = "icecast_metadata"
+
         upcoming_tempo = _strict_tempo_upcoming(current_title=current_title, n=n)
 
-        chosen = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else []
-        if not isinstance(chosen, list):
-            chosen = []
+        chosen: List[Dict[str, Any]]
+        primary_source: Optional[str]
+        secondary_source: Optional[str]
+        used_source: str
+
+        if runtime_queue:
+            # Source primaire: vraie file moteur déjà validée par le scheduler/tempo gate.
+            chosen = runtime_queue[:n]
+            primary_source = "runtime_queue_state"
+            secondary_source = upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None
+            used_source = "runtime_queue_primary"
+        else:
+            chosen = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else []
+            if not isinstance(chosen, list):
+                chosen = []
+            primary_source = upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None
+            secondary_source = None
+            used_source = "tempo_accept_strict"
 
         return {
             "ok": True,
             "current_title_observed": current_title,
             "source": {
-                "primary": upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None,
-                "secondary": None,
+                "primary": primary_source,
+                "secondary": secondary_source,
             },
             "upcoming": chosen[:n],
             "debug": {
-                "title_source": "icecast_metadata" if icecast_title else None,
+                "title_source": title_source,
                 "icecast_ok": bool(isinstance(ic, dict) and ic.get("ok")),
                 "icecast_error": (ic.get("error") if isinstance(ic, dict) else None),
+                "runtime_now": runtime_now,
+                "runtime_queue_count": len(runtime_queue),
                 "tempo_runtime": tempo_runtime,
                 "tempo_accept": upcoming_tempo,
-                "used_source": "tempo_accept_strict",
+                "used_source": used_source,
             },
         }
 
