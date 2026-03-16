@@ -1,0 +1,442 @@
+name: Export symbols snapshot (Python AST)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: export-symbols-snapshot
+  cancel-in-progress: true
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate code_symbols_snapshot.txt (inline AST exporter)
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import ast
+          import os
+          from dataclasses import dataclass
+          from pathlib import Path
+          from typing import Iterable, List, Optional
+
+          OUTPUT_FILE = "code_symbols_snapshot.txt"
+
+          IGNORED_DIRS = {
+              ".git", ".github", "__pycache__", "venv", ".venv",
+              "node_modules", "dist", "build", ".next", ".nuxt",
+              "coverage", ".pytest_cache", ".mypy_cache",
+              "target",
+          }
+
+          IGNORED_FILENAMES = {
+              "package-lock.json",
+              "pnpm-lock.yaml",
+              "yarn.lock",
+              "bun.lockb",
+              "npm-shrinkwrap.json",
+              "Pipfile.lock",
+              "poetry.lock",
+              "uv.lock",
+              "Cargo.lock",
+              "composer.lock",
+          }
+
+          MAX_FILE_BYTES = 300 * 1024  # 300 KB
+
+          def normpath(p: Path) -> str:
+              return str(p).replace("\\", "/")
+
+          def should_ignore_path(p: Path) -> bool:
+              s = normpath(p)
+              for d in IGNORED_DIRS:
+                  if f"/{d}/" in s or s.endswith(f"/{d}"):
+                      return True
+              return False
+
+          def build_filetree(root: Path) -> str:
+              lines: List[str] = []
+              for dirpath, dirnames, filenames in os.walk(root):
+                  dp = Path(dirpath)
+                  if should_ignore_path(dp):
+                      dirnames[:] = []
+                      continue
+
+                  rel = dp.relative_to(root)
+                  depth = len(rel.parts)
+                  indent = "  " * depth
+
+                  if rel != Path("."):
+                      lines.append(f"{indent}- {normpath(rel)}/")
+
+                  for fn in sorted(filenames):
+                      fp = dp / fn
+                      if should_ignore_path(fp):
+                          continue
+                      if fn in IGNORED_FILENAMES:
+                          continue
+                      lines.append(f"{indent}  - {fn}")
+              return "\n".join(lines)
+
+          def is_python_file(fp: Path) -> bool:
+              if fp.name == OUTPUT_FILE:
+                  return False
+              if fp.name in IGNORED_FILENAMES:
+                  return False
+              if fp.suffix.lower() != ".py":
+                  return False
+              try:
+                  if fp.stat().st_size > MAX_FILE_BYTES:
+                      return False
+              except OSError:
+                  return False
+              return True
+
+          def safe_doc_first_line(doc: Optional[str]) -> str:
+              if not doc:
+                  return ""
+              first = doc.strip().splitlines()[0].strip()
+              if len(first) > 140:
+                  first = first[:137] + "..."
+              return first
+
+          def unparse_fallback(node: ast.AST) -> str:
+              try:
+                  return ast.unparse(node)  # py3.9+
+              except Exception:
+                  return node.__class__.__name__
+
+          def decorators_info(dec_nodes: List[ast.expr]) -> List[str]:
+              return [unparse_fallback(d) for d in dec_nodes]
+
+          @dataclass
+          class PySymbolReport:
+              relpath: str
+              module_doc: str
+              imports: List[str]
+              constants: List[str]
+              functions: List[str]
+              classes: List[str]
+
+              def to_text(self) -> str:
+                  parts: List[str] = []
+                  parts.append(f"# {self.relpath}\n")
+
+                  if self.module_doc:
+                      parts.append(f"module: {self.module_doc}\n")
+
+                  if self.imports:
+                      parts.append("\nimports:\n")
+                      for x in self.imports:
+                          parts.append(f"  - {x}\n")
+
+                  if self.constants:
+                      parts.append("\nmodule vars:\n")
+                      for x in self.constants:
+                          parts.append(f"  - {x}\n")
+
+                  if self.functions:
+                      parts.append("\nfunctions:\n")
+                      for x in self.functions:
+                          parts.append(f"  - {x}\n")
+
+                  if self.classes:
+                      parts.append("\nclasses:\n")
+                      for x in self.classes:
+                          parts.append(f"{x}\n")
+
+                  parts.append("\n")
+                  return "".join(parts)
+
+          class SymbolExtractor(ast.NodeVisitor):
+              def __init__(self) -> None:
+                  self.imports: List[str] = []
+                  self.constants: List[str] = []
+                  self.functions: List[str] = []
+                  self.classes: List[str] = []
+                  self._class_stack: List[str] = []
+                  self._func_stack: List[str] = []
+
+              def visit_Import(self, node: ast.Import) -> None:
+                  for alias in node.names:
+                      if alias.asname:
+                          self.imports.append(f"import {alias.name} as {alias.asname}")
+                      else:
+                          self.imports.append(f"import {alias.name}")
+
+              def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+                  mod = node.module or ""
+                  level = "." * node.level if getattr(node, "level", 0) else ""
+                  names = []
+                  for alias in node.names:
+                      if alias.asname:
+                          names.append(f"{alias.name} as {alias.asname}")
+                      else:
+                          names.append(alias.name)
+                  self.imports.append(f"from {level}{mod} import {', '.join(names)}")
+
+              def _format_args(self, node: ast.arguments) -> str:
+                  parts: List[str] = []
+
+                  def fmt_arg(a: ast.arg) -> str:
+                      if a.annotation is not None:
+                          return f"{a.arg}: {unparse_fallback(a.annotation)}"
+                      return a.arg
+
+                  posonly = getattr(node, "posonlyargs", [])
+                  for a in posonly:
+                      parts.append(fmt_arg(a))
+                  if posonly:
+                      parts.append("/")
+
+                  for a in node.args:
+                      parts.append(fmt_arg(a))
+
+                  if node.vararg is not None:
+                      parts.append("*" + fmt_arg(node.vararg))
+                  elif node.kwonlyargs:
+                      parts.append("*")
+
+                  for a, default in zip(node.kwonlyargs, node.kw_defaults):
+                      s = fmt_arg(a)
+                      if default is not None:
+                          s += f"={unparse_fallback(default)}"
+                      parts.append(s)
+
+                  if node.kwarg is not None:
+                      parts.append("**" + fmt_arg(node.kwarg))
+
+                  return ", ".join(parts)
+
+              def _format_return(self, node: ast.AST) -> str:
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns is not None:
+                      return f" -> {unparse_fallback(node.returns)}"
+                  return ""
+
+              def _format_doc(self, doc: Optional[str]) -> str:
+                  first = safe_doc_first_line(doc)
+                  return f"  # {first}" if first else ""
+
+              def _format_func_decl(self, node: ast.AST, *, method: bool) -> str:
+                  assert isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  async_prefix = "async " if isinstance(node, ast.AsyncFunctionDef) else ""
+                  args = self._format_args(node.args)
+                  ret = self._format_return(node)
+                  decos = decorators_info(node.decorator_list)
+                  deco_str = f" @{', '.join(decos)}" if decos else ""
+                  kind = "method" if method else "def"
+                  doc = self._format_doc(ast.get_docstring(node))
+                  return f"{async_prefix}{kind} {node.name}({args}){ret}{deco_str}{doc}"
+
+              def _simple_assign_targets(self, targets: List[ast.expr]) -> List[str]:
+                  out: List[str] = []
+                  for t in targets:
+                      if isinstance(t, ast.Name):
+                          out.append(t.id)
+                      elif isinstance(t, ast.Tuple):
+                          for e in t.elts:
+                              if isinstance(e, ast.Name):
+                                  out.append(e.id)
+                  return out
+
+              def visit_Assign(self, node: ast.Assign) -> None:
+                  if self._class_stack or self._func_stack:
+                      return
+                  names = self._simple_assign_targets(node.targets)
+                  if not names:
+                      return
+                  rhs = unparse_fallback(node.value)
+                  for n in names:
+                      self.constants.append(f"{n} = {rhs}")
+
+              def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+                  if self._class_stack or self._func_stack:
+                      return
+                  if isinstance(node.target, ast.Name):
+                      name = node.target.id
+                      ann = unparse_fallback(node.annotation) if node.annotation is not None else "Any"
+                      if node.value is not None:
+                          val = unparse_fallback(node.value)
+                          self.constants.append(f"{name}: {ann} = {val}")
+                      else:
+                          self.constants.append(f"{name}: {ann}")
+
+              def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                  if self._class_stack:
+                      # méthode : gérée au niveau de la classe
+                      return
+                  if self._func_stack:
+                      return
+                  self.functions.append(self._format_func_decl(node, method=False))
+
+              def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+                  if self._class_stack:
+                      return
+                  if self._func_stack:
+                      return
+                  self.functions.append(self._format_func_decl(node, method=False))
+
+              def visit_ClassDef(self, node: ast.ClassDef) -> None:
+                  if self._class_stack or self._func_stack:
+                      return
+
+                  self._class_stack.append(node.name)
+                  try:
+                      bases = [unparse_fallback(b) for b in node.bases]
+                      bases_str = f"({', '.join(bases)})" if bases else ""
+                      doc = self._format_doc(ast.get_docstring(node))
+
+                      methods: List[str] = []
+                      for item in node.body:
+                          if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                              methods.append(self._format_func_decl(item, method=True))
+
+                      block: List[str] = []
+                      block.append(f"  - class {node.name}{bases_str}{doc}\n")
+                      for m in methods:
+                          block.append(f"      * {m}\n")
+                      self.classes.append("".join(block))
+                  finally:
+                      self._class_stack.pop()
+
+          def extract_python_symbols(fp: Path) -> PySymbolReport:
+              raw = fp.read_text(encoding="utf-8", errors="replace")
+              tree = ast.parse(raw, filename=str(fp))
+
+              extractor = SymbolExtractor()
+              extractor.visit(tree)
+
+              module_doc = safe_doc_first_line(ast.get_docstring(tree))
+              return PySymbolReport(
+                  relpath=normpath(fp),
+                  module_doc=module_doc,
+                  imports=sorted(set(extractor.imports)),
+                  constants=sorted(set(extractor.constants)),
+                  functions=sorted(set(extractor.functions)),
+                  classes=extractor.classes,
+              )
+
+          def iter_python_files(root: Path) -> Iterable[Path]:
+              for dirpath, dirnames, filenames in os.walk(root):
+                  dp = Path(dirpath)
+                  if should_ignore_path(dp):
+                      dirnames[:] = []
+                      continue
+                  for fn in sorted(filenames):
+                      fp = dp / fn
+                      if should_ignore_path(fp):
+                          continue
+                      if is_python_file(fp):
+                          yield fp
+
+          def main() -> None:
+              root = Path(".").resolve()
+
+              parts: List[str] = []
+              parts.append("# Snapshot: file tree + symbol index (Python AST)\n\n")
+
+              parts.append("## Arborescence du dépôt\n\n")
+              parts.append(build_filetree(root))
+              parts.append("\n\n---\n")
+
+              reports: List[PySymbolReport] = []
+              for fp in iter_python_files(root):
+                  try:
+                      rel = fp.relative_to(root)
+                      reports.append(extract_python_symbols(rel))
+                  except SyntaxError as e:
+                      reports.append(
+                          PySymbolReport(
+                              relpath=normpath(fp.relative_to(root)),
+                              module_doc="",
+                              imports=[],
+                              constants=[],
+                              functions=[],
+                              classes=[f"  - [SyntaxError] {e}"],
+                          )
+                      )
+                  except Exception as e:
+                      reports.append(
+                          PySymbolReport(
+                              relpath=normpath(fp.relative_to(root)),
+                              module_doc="",
+                              imports=[],
+                              constants=[],
+                              functions=[],
+                              classes=[f"  - [Error] {e}"],
+                          )
+                      )
+
+              parts.append("## Index des modules Python\n\n")
+              for r in reports:
+                  parts.append(f"- {r.relpath}\n")
+              parts.append("\n\n---\n")
+
+              parts.append("## Détails par module\n\n")
+              for r in reports:
+                  parts.append("---\n")
+                  parts.append(r.to_text())
+
+              combined = "".join(parts)
+              estimated_tokens = int(len(combined) / 4)
+              combined += f"\n---\n# Estimation du nombre de tokens : {estimated_tokens} tokens\n"
+
+              Path(OUTPUT_FILE).write_text(combined, encoding="utf-8")
+              print(f"[ok] wrote {OUTPUT_FILE} ({len(reports)} python files)")
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+      - name: Commit & push snapshot to code-snapshots branch (rebase-safe)
+        shell: bash
+        run: |
+          set -e
+          BRANCH="code-snapshots"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin "${BRANCH}:${BRANCH}" || true
+
+          if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+            git checkout "${BRANCH}"
+          else
+            git checkout -b "${BRANCH}"
+          fi
+
+          if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH}"; then
+            git rebase "origin/${BRANCH}"
+          fi
+
+          mkdir -p snapshots
+          TS="$(date -u +'%Y%m%d-%H%M%S')"
+          DEST="snapshots/code_symbols_snapshot_${TS}.txt"
+          mv code_symbols_snapshot.txt "$DEST"
+
+          git add "$DEST"
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore(snapshot): add python symbols snapshot ${TS}"
+
+          git pull --rebase origin "${BRANCH}" || true
+          git push origin "${BRANCH}"
