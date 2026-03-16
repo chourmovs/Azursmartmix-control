@@ -17,7 +17,7 @@ from azursmartmix_control.compose_reader import (
     set_env_in_host_envfile,
 )
 from azursmartmix_control.icecast_client import IcecastClient
-from azurmixd.runtime_queue_state import get_state
+from azursmartmix_control.runtime_queue_state import get_state
 
 
 def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
