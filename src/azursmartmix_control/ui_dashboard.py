@@ -144,14 +144,23 @@ class DashboardMixin:
         playlist_eff = now.get("playlist_effective")
         pl_txt = html.escape(str(playlist_eff)) if playlist_eff else "—"
 
+        bpm_eff = now.get("bpm_runtime")
+        bpm_txt = "—"
+        if isinstance(bpm_eff, (int, float)):
+            bpm_txt = html.escape(f"{float(bpm_eff):.2f}")
+
         predicted = now.get("predicted_next") if isinstance(now.get("predicted_next"), dict) else None
         pred_title = "—"
         pred_pl = "—"
+        pred_bpm = "—"
         if predicted:
             pred_title = html.escape(
                 str(predicted.get("title_display") or predicted.get("title") or "—")
             )
             pred_pl = html.escape(str(predicted.get("playlist") or "—"))
+            pred_bpm_raw = predicted.get("bpm")
+            if isinstance(pred_bpm_raw, (int, float)):
+                pred_bpm = html.escape(f"{float(pred_bpm_raw):.2f}")
 
         ss = now.get("engine_stream_start") if isinstance(now.get("engine_stream_start"), dict) else None
         hint = ""
@@ -172,9 +181,11 @@ class DashboardMixin:
 
         return (
             '<div class="np-meta">'
-            f'  <div class="np-line"><span class="np-k">playlist:</span> <span class="np-v" data-copy="{pl_txt}">{pl_txt}</span></div>'
+            f'  <div class="np-line"><span class="np-k">playlist:</span> <span class="np-v" data-copy="{pl_txt}">{pl_txt}</span>'
+            f'    <span class="t-dim">|</span> <span class="np-k">bpm:</span> <span class="np-v" data-copy="{bpm_txt}">{bpm_txt}</span></div>'
             f'  <div class="np-line"><span class="np-k">next(pred):</span> <span class="np-v" data-copy="{pred_title}">{pred_title}</span>'
-            f'    <span class="t-dim">|</span> <span class="np-k">pl:</span> <span class="np-v" data-copy="{pred_pl}">{pred_pl}</span></div>'
+            f'    <span class="t-dim">|</span> <span class="np-k">pl:</span> <span class="np-v" data-copy="{pred_pl}">{pred_pl}</span>'
+            f'    <span class="t-dim">|</span> <span class="np-k">bpm:</span> <span class="np-v" data-copy="{pred_bpm}">{pred_bpm}</span></div>'
             f'  <div class="np-line">{hint}</div>'
             "</div>"
         )
@@ -300,6 +311,7 @@ class DashboardMixin:
             playlist = str(it.get("playlist") or "—")
             ts = str(it.get("ts") or "")
             delta_pct = it.get("delta_pct")
+            bpm = it.get("bpm")
 
             title_e = html.escape(title)
             playlist_e = html.escape(playlist)
@@ -309,12 +321,19 @@ class DashboardMixin:
                 if isinstance(delta_pct, (int, float))
                 else ""
             )
+            bpm_e = (
+                html.escape(f"{float(bpm):.2f} BPM")
+                if isinstance(bpm, (int, float))
+                else ""
+            )
 
             parts: List[str] = []
             if playlist and playlist != "—":
                 parts.append(
                     f'<span class="t-cyan t-bold" data-copy="{playlist_e}">{playlist_e}</span>'
                 )
+            if bpm_e:
+                parts.append(f'<span class="t-dim">BPM</span> <span class="t-ok t-bold">{bpm_e}</span>')
             if delta_e:
                 parts.append(f'<span class="t-dim">Δ</span> <span class="t-ok t-bold">{delta_e}</span>')
             if ts:
