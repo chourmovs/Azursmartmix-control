@@ -144,10 +144,10 @@ class DashboardMixin:
         playlist_eff = now.get("playlist_effective")
         pl_txt = html.escape(str(playlist_eff)) if playlist_eff else "—"
 
-        bpm_eff = now.get("bpm_runtime")
+        bpm_runtime = now.get("bpm_runtime")
         bpm_txt = "—"
-        if isinstance(bpm_eff, (int, float)):
-            bpm_txt = html.escape(f"{float(bpm_eff):.2f}")
+        if isinstance(bpm_runtime, (int, float)):
+            bpm_txt = html.escape(f"{float(bpm_runtime):.2f}")
 
         predicted = now.get("predicted_next") if isinstance(now.get("predicted_next"), dict) else None
         pred_title = "—"
@@ -158,9 +158,9 @@ class DashboardMixin:
                 str(predicted.get("title_display") or predicted.get("title") or "—")
             )
             pred_pl = html.escape(str(predicted.get("playlist") or "—"))
-            pred_bpm_raw = predicted.get("bpm")
-            if isinstance(pred_bpm_raw, (int, float)):
-                pred_bpm = html.escape(f"{float(pred_bpm_raw):.2f}")
+            raw_pred_bpm = predicted.get("bpm")
+            if isinstance(raw_pred_bpm, (int, float)):
+                pred_bpm = html.escape(f"{float(raw_pred_bpm):.2f}")
 
         ss = now.get("engine_stream_start") if isinstance(now.get("engine_stream_start"), dict) else None
         hint = ""
@@ -322,7 +322,7 @@ class DashboardMixin:
                 else ""
             )
             bpm_e = (
-                html.escape(f"{float(bpm):.2f} BPM")
+                html.escape(f"{float(bpm):.2f}")
                 if isinstance(bpm, (int, float))
                 else ""
             )
@@ -333,7 +333,7 @@ class DashboardMixin:
                     f'<span class="t-cyan t-bold" data-copy="{playlist_e}">{playlist_e}</span>'
                 )
             if bpm_e:
-                parts.append(f'<span class="t-dim">BPM</span> <span class="t-ok t-bold">{bpm_e}</span>')
+                parts.append(f'<span class="t-dim">bpm</span> <span class="t-ok t-bold">{bpm_e}</span>')
             if delta_e:
                 parts.append(f'<span class="t-dim">Δ</span> <span class="t-ok t-bold">{delta_e}</span>')
             if ts:
