@@ -437,6 +437,7 @@ def create_api(settings: Settings) -> FastAPI:
                     "title_display": sched_entry.get("title_display") or docker_client.display_title(title),
                     "playlist": sched_entry.get("playlist"),
                     "ts": sched_entry.get("ts"),
+                    "bpm": sched_entry.get("bpm"),
                 }
             )
             if len(out) >= limit:
@@ -586,7 +587,6 @@ def create_api(settings: Settings) -> FastAPI:
         used_source: str
 
         if runtime_queue:
-            # Source primaire: vraie file moteur déjà validée par le scheduler/tempo gate.
             chosen = runtime_queue[:n]
             primary_source = "runtime_queue_state"
             secondary_source = upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None
