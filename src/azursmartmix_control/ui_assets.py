@@ -147,9 +147,117 @@ html, body { background: var(--az-bg) !important; color: var(--az-text) !importa
 .az-opbtn .q-btn--outline{ border:1px solid rgba(255,255,255,.55) !important; color:white !important; }
 
 .az-list{ display:flex; flex-direction:column; gap:8px; }
-.az-item{ padding: 10px 12px; border-radius: 10px; border: 1px solid var(--az-border); background: rgba(255,255,255,.04); }
-.az-item .idx{ display:inline-block; min-width:24px; font-weight:950; color: rgba(255,255,255,.75); }
+.az-item{
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--az-border);
+  background: rgba(255,255,255,.04);
+}
+.az-item .idx{
+  display:inline-block;
+  min-width:24px;
+  font-weight:950;
+  color: rgba(255,255,255,.75);
+}
 .az-item .txt{ font-weight:650; }
+
+.az-up-item{
+  display:flex;
+  flex-direction:column;
+  gap: 6px;
+}
+.az-up-head{
+  display:flex;
+  align-items:flex-start;
+  gap: 10px;
+}
+.az-up-idx{
+  min-width: 28px;
+  font-weight: 950;
+  color: rgba(255,255,255,.76);
+  line-height: 1.4;
+}
+.az-up-main{
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.az-up-title{
+  font-weight: 850;
+  color: rgba(255,255,255,.96);
+  word-break: break-word;
+  line-height: 1.35;
+}
+.az-up-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap: 8px;
+  align-items:center;
+  margin-top: 2px;
+  font-family: var(--az-mono);
+  font-size: 13px;
+  color: rgba(255,255,255,.78);
+}
+.az-up-badge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 8px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+  font-size:12px;
+  font-weight:900;
+  letter-spacing:.02em;
+}
+.az-up-badge.runtime{
+  color: rgba(34, 211, 238, .98);
+  border-color: rgba(34, 211, 238, .28);
+  background: rgba(34, 211, 238, .08);
+}
+.az-up-badge.tempo{
+  color: rgba(245, 158, 11, .98);
+  border-color: rgba(245, 158, 11, .30);
+  background: rgba(245, 158, 11, .08);
+}
+.az-up-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 8px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+  font-size:12px;
+  font-weight:850;
+  line-height:1;
+}
+.az-up-chip.playlist{
+  color: rgba(34, 211, 238, .98);
+  border-color: rgba(34, 211, 238, .26);
+  background: rgba(34, 211, 238, .07);
+}
+.az-up-chip.bpm{
+  color: rgba(34, 197, 94, .98);
+  border-color: rgba(34, 197, 94, .24);
+  background: rgba(34, 197, 94, .08);
+}
+.az-up-chip.delta{
+  color: rgba(245, 158, 11, .98);
+  border-color: rgba(245, 158, 11, .26);
+  background: rgba(245, 158, 11, .08);
+}
+.az-up-chip.ts{
+  color: rgba(255,255,255,.72);
+  border-color: rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+}
+.az-up-sub{
+  margin-left: 38px;
+  font-family: var(--az-mono);
+  font-size: 12px;
+  color: rgba(255,255,255,.56);
+  word-break: break-word;
+}
 
 .rt-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }
 @media (max-width: 900px){ .rt-grid{ grid-template-columns: 1fr; } }
@@ -637,7 +745,29 @@ document.addEventListener('click', (ev) => {
       '</div>'
     );
   }
-  
+
+  function detectUpcomingSource(it){
+    const hasBpm = Number.isFinite(Number(it?.bpm));
+    const hasDelta = Number.isFinite(Number(it?.delta_pct));
+    if (hasDelta && !hasBpm) return 'tempo';
+    if (hasBpm) return 'runtime';
+    return 'mixed';
+  }
+
+  function upcomingSourceBadge(source){
+    if (source === 'runtime') {
+      return '<span class="az-up-badge runtime">RUNTIME</span>';
+    }
+    if (source === 'tempo') {
+      return '<span class="az-up-badge tempo">TEMPO</span>';
+    }
+    return '<span class="az-up-badge">MERGED</span>';
+  }
+
+  function chip(cls, label, value){
+    return '<span class="az-up-chip ' + esc(cls) + '"><span>' + esc(label) + '</span><span data-copy="' + esc(value) + '">' + esc(value) + '</span></span>';
+  }
+
   function upcomingHTML(items){
     const arr = Array.isArray(items) ? items : [];
     if (!arr.length) {
@@ -645,40 +775,56 @@ document.addEventListener('click', (ev) => {
     }
 
     return arr.map((it, idx) => {
+      const source = detectUpcomingSource(it);
       const title = String(it?.title_display || it?.title || '—');
-      const playlist = String(it?.playlist || '—');
-      const ts = String(it?.ts || '');
-
-      const delta = Number(it?.delta_pct);
-      const deltaTxt = Number.isFinite(delta) ? delta.toFixed(2) + '%' : '';
+      const playlist = String(it?.playlist || '').trim();
+      const ts = String(it?.ts || '').trim();
+      const fromTitle = String(it?.from_title || '').trim();
 
       const bpm = Number(it?.bpm);
       const bpmTxt = Number.isFinite(bpm) ? bpm.toFixed(2) : '';
 
-      const parts = [];
-      if (playlist && playlist !== '—') {
-        parts.push('<span class="t-cyan t-bold" data-copy="' + esc(playlist) + '">' + esc(playlist) + '</span>');
+      const delta = Number(it?.delta_pct);
+      const deltaTxt = Number.isFinite(delta) ? delta.toFixed(2) + '%' : '';
+
+      const metaParts = [];
+      metaParts.push(upcomingSourceBadge(source));
+
+      if (playlist) {
+        metaParts.push(chip('playlist', 'PL', playlist));
       }
       if (bpmTxt) {
-        parts.push('<span class="t-dim">bpm</span> <span class="t-ok t-bold">' + esc(bpmTxt) + '</span>');
+        metaParts.push(chip('bpm', 'BPM', bpmTxt));
       }
       if (deltaTxt) {
-        parts.push('<span class="t-dim">Δ</span> <span class="t-ok t-bold">' + esc(deltaTxt) + '</span>');
+        metaParts.push(chip('delta', 'Δtempo', deltaTxt));
       }
       if (ts) {
-        parts.push('<span class="t-dim">[' + esc(ts) + ']</span>');
+        metaParts.push(chip('ts', 'TS', ts));
       }
 
-      const tail = parts.length ? (' <span class="t-dim">|</span> ' + parts.join(' ')) : '';
+      let sub = '';
+      if (source === 'tempo' && fromTitle) {
+        sub = '<div class="az-up-sub">transition from <span data-copy="' + esc(fromTitle) + '">' + esc(fromTitle) + '</span></div>';
+      }
 
       return (
-        '<div class="az-item"><span class="idx">' + (idx + 1) + '.</span> ' +
-        '<span class="txt" data-copy="' + esc(title) + '">' + esc(title) + '</span>' +
-        tail +
+        '<div class="az-item">' +
+          '<div class="az-up-item">' +
+            '<div class="az-up-head">' +
+              '<div class="az-up-idx">' + (idx + 1) + '.</div>' +
+              '<div class="az-up-main">' +
+                '<div class="az-up-title" data-copy="' + esc(title) + '">' + esc(title) + '</div>' +
+                '<div class="az-up-meta">' + metaParts.join('') + '</div>' +
+              '</div>' +
+            '</div>' +
+            sub +
+          '</div>' +
         '</div>'
       );
     }).join('');
   }
+
   function logsHTML(text){
     return '<div class="console-content">' + esc(text || '—') + '</div>';
   }
