@@ -255,6 +255,31 @@ def create_api(settings: Settings) -> FastAPI:
 
         return out
 
+    def _merge_upcoming_sources(
+        primary: List[Dict[str, Any]],
+        secondary: List[Dict[str, Any]],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for seq in (primary, secondary):
+            if not isinstance(seq, list):
+                continue
+            for item in seq:
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title") or item.get("title_display") or "").strip()
+                norm = docker_client.normalize_title(title)
+                if not norm or norm in seen:
+                    continue
+                seen.add(norm)
+                out.append(item)
+                if len(out) >= limit:
+                    return out
+
+        return out
+
     @app.get("/runtime/queue")
     def runtime_queue():
         return get_state()
@@ -566,20 +591,29 @@ def create_api(settings: Settings) -> FastAPI:
 
         upcoming_tempo = _strict_tempo_upcoming(current_title=current_title, n=n)
 
-        chosen: List[Dict[str, Any]]
+        tempo_items = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else []
+        if not isinstance(tempo_items, list):
+            tempo_items = []
+
+        chosen = _merge_upcoming_sources(
+            primary=runtime_queue,
+            secondary=tempo_items,
+            limit=n,
+        )
+
         primary_source: Optional[str]
         secondary_source: Optional[str]
         used_source: str
 
-        if runtime_queue:
-            chosen = runtime_queue[:n]
+        if runtime_queue and tempo_items:
             primary_source = "runtime_queue_state"
             secondary_source = upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None
-            used_source = "runtime_queue_primary"
+            used_source = "runtime_queue_plus_tempo_fill"
+        elif runtime_queue:
+            primary_source = "runtime_queue_state"
+            secondary_source = None
+            used_source = "runtime_queue_only"
         else:
-            chosen = upcoming_tempo.get("upcoming") if isinstance(upcoming_tempo, dict) else []
-            if not isinstance(chosen, list):
-                chosen = []
             primary_source = upcoming_tempo.get("source") if isinstance(upcoming_tempo, dict) else None
             secondary_source = None
             used_source = "tempo_accept_strict"
@@ -600,6 +634,7 @@ def create_api(settings: Settings) -> FastAPI:
                 "runtime_queue_count": len(runtime_queue),
                 "tempo_runtime": tempo_runtime,
                 "tempo_accept": upcoming_tempo,
+                "tempo_items_count": len(tempo_items),
                 "used_source": used_source,
             },
         }
