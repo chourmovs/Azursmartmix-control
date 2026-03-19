@@ -59,13 +59,39 @@ class Settings(BaseSettings):
     # Image repo base for dynamic tag selection
     azursmartmix_repo: str = Field(default="chourmovs/azursmartmix", alias="AZURSMARTMIX_REPO")
 
-    # AzuraCast admin/read API used by the control plane.
-    # Conservative defaults mirror the scheduler/provider side.
-    azuracast_base_url: str = Field(default="http://web", alias="AZURACAST_BASE_URL")
-    azuracast_api_key: str = Field(default="", alias="AZURACAST_API_KEY")
-    azuracast_station_id: int = Field(default=1, alias="AZURACAST_STATION_ID")
-    azuracast_timeout_s: float = Field(default=10.0, alias="AZURACAST_TIMEOUT_S")
-    azuracast_verify_tls: bool = Field(default=False, alias="AZURACAST_VERIFY_TLS")
+    # ------------------------------------------------------------------
+    # AzuraCast control plane access (NEW - read-only integration layer)
+    # ------------------------------------------------------------------
+    # NOTE:
+    # - Values are expected to be injected via env_file (/var/azuramix/azuramix.env)
+    # - Defaults are conservative and match typical AzuraCast docker network
+    # - No hard dependency: empty API key => calls will fail gracefully (403)
+    # ------------------------------------------------------------------
+
+    azuracast_base_url: str = Field(
+        default="http://web",
+        alias="AZURACAST_BASE_URL",
+    )
+
+    azuracast_api_key: str = Field(
+        default="",
+        alias="AZURACAST_API_KEY",
+    )
+
+    azuracast_station_id: int = Field(
+        default=1,
+        alias="AZURACAST_STATION_ID",
+    )
+
+    azuracast_timeout_s: float = Field(
+        default=10.0,
+        alias="AZURACAST_TIMEOUT_S",
+    )
+
+    azuracast_verify_tls: bool = Field(
+        default=False,
+        alias="AZURACAST_VERIFY_TLS",
+    )
 
 
 def get_settings() -> Settings:
