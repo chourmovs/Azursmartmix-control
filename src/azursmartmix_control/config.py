@@ -1,7 +1,8 @@
+# src/azursmartmix_control/config.py
 from __future__ import annotations
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -32,7 +33,7 @@ class Settings(BaseSettings):
     azuramix_dir: str = Field(default="/var/azuramix", alias="AZURAMIX_DIR")
     azuramix_compose_file: str = Field(default="/var/azuramix/docker-compose.yml", alias="AZURAMIX_COMPOSE_FILE")
 
-    # NEW: Host env file (the only file we edit for settings)
+    # Host env file (the only file we edit for settings)
     azuramix_env_file: str = Field(default="/var/azuramix/azuramix.env", alias="AZURAMIX_ENV_FILE")
 
     # Icecast now-playing
@@ -57,6 +58,14 @@ class Settings(BaseSettings):
 
     # Image repo base for dynamic tag selection
     azursmartmix_repo: str = Field(default="chourmovs/azursmartmix", alias="AZURSMARTMIX_REPO")
+
+    # AzuraCast admin/read API used by the control plane.
+    # Conservative defaults mirror the scheduler/provider side.
+    azuracast_base_url: str = Field(default="http://web", alias="AZURACAST_BASE_URL")
+    azuracast_api_key: str = Field(default="", alias="AZURACAST_API_KEY")
+    azuracast_station_id: int = Field(default=1, alias="AZURACAST_STATION_ID")
+    azuracast_timeout_s: float = Field(default=10.0, alias="AZURACAST_TIMEOUT_S")
+    azuracast_verify_tls: bool = Field(default=False, alias="AZURACAST_VERIFY_TLS")
 
 
 def get_settings() -> Settings:
