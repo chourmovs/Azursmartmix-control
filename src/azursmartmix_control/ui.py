@@ -1,3 +1,4 @@
+# src/azursmartmix_control/ui.py
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -101,7 +102,12 @@ class ControlUI(SettingsMixin, DashboardMixin):
 
         self._tabs = None
         self._tab_dashboard = "Dashboard"
+        self._tab_library = "Library"
         self._tab_settings = "Settings"
+
+        self._library_playlist_html = None
+        self._library_mounts_html = None
+        self._library_busy = False
 
         self._settings_service = "engine"
         self._settings_advanced = False
@@ -212,6 +218,152 @@ class ControlUI(SettingsMixin, DashboardMixin):
         except Exception:
             return False
 
+    # -------------------- Library (read-only, minimal) --------------------
+
+    def _library_playlists_html(self, data: Dict[str, Any]) -> str:
+        if not isinstance(data, dict) or not data.get("ok"):
+            err = html.escape(str((data or {}).get("error") or "—"))
+            return f'<div class="az-list"><div class="az-item"><span class="txt">error: {err}</span></div></div>'
+
+        items = data.get("items") or []
+        if not isinstance(items, list) or not items:
+            return '<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>'
+
+        rows: List[str] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            name = html.escape(str(it.get("name") or "—"))
+            short_name = html.escape(str(it.get("short_name") or "—"))
+            ptype = html.escape(str(it.get("type") or "—"))
+            source = html.escape(str(it.get("source") or "—"))
+            order = html.escape(str(it.get("order") or "—"))
+            weight = html.escape(str(it.get("weight") if it.get("weight") is not None else "—"))
+            num_songs = html.escape(str(it.get("num_songs") if it.get("num_songs") is not None else "—"))
+            enabled = bool(it.get("is_enabled"))
+            jingle = bool(it.get("is_jingle"))
+            pid = html.escape(str(it.get("id") if it.get("id") is not None else "—"))
+
+            badges: List[str] = []
+            badges.append(
+                f'<span class="az-up-badge {"runtime" if enabled else ""}">{html.escape("ENABLED" if enabled else "DISABLED")}</span>'
+            )
+            if jingle:
+                badges.append('<span class="az-up-badge tempo">JINGLE</span>')
+
+            meta = (
+                f'<span class="az-up-chip playlist"><span>ID</span><span data-copy="{pid}">{pid}</span></span>'
+                f'<span class="az-up-chip"><span>SHORT</span><span data-copy="{short_name}">{short_name}</span></span>'
+                f'<span class="az-up-chip"><span>TYPE</span><span data-copy="{ptype}">{ptype}</span></span>'
+                f'<span class="az-up-chip"><span>SRC</span><span data-copy="{source}">{source}</span></span>'
+                f'<span class="az-up-chip"><span>ORDER</span><span data-copy="{order}">{order}</span></span>'
+                f'<span class="az-up-chip bpm"><span>TRACKS</span><span data-copy="{num_songs}">{num_songs}</span></span>'
+                f'<span class="az-up-chip delta"><span>W</span><span data-copy="{weight}">{weight}</span></span>'
+            )
+
+            rows.append(
+                '<div class="az-item">'
+                '  <div class="az-up-item">'
+                '    <div class="az-up-head">'
+                '      <div class="az-up-main">'
+                f'        <div class="az-up-title" data-copy="{name}">{name}</div>'
+                f'        <div class="az-up-meta">{"".join(badges)}{meta}</div>'
+                '      </div>'
+                '    </div>'
+                '  </div>'
+                '</div>'
+            )
+
+        return f'<div class="az-list">{"".join(rows)}</div>'
+
+    def _library_mountpoints_html(self, data: Dict[str, Any]) -> str:
+        if not isinstance(data, dict) or not data.get("ok"):
+            err = html.escape(str((data or {}).get("error") or "—"))
+            return f'<div class="az-list"><div class="az-item"><span class="txt">error: {err}</span></div></div>'
+
+        items = data.get("items") or []
+        if not isinstance(items, list) or not items:
+            return '<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>'
+
+        rows: List[str] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            name = html.escape(str(it.get("name") or it.get("display_name") or "—"))
+            path = html.escape(str(it.get("path") or "—"))
+            fmt = html.escape(str(it.get("format") or "—"))
+            bitrate = html.escape(str(it.get("bitrate") if it.get("bitrate") is not None else "—"))
+            listeners = html.escape(str(it.get("listeners") if it.get("listeners") is not None else "—"))
+            default_badge = '<span class="az-up-badge runtime">DEFAULT</span>' if bool(it.get("is_default")) else ''
+            public_badge = '<span class="az-up-badge tempo">PUBLIC</span>' if bool(it.get("is_public")) else ''
+
+            meta = (
+                f'<span class="az-up-chip playlist"><span>PATH</span><span data-copy="{path}">{path}</span></span>'
+                f'<span class="az-up-chip"><span>FMT</span><span data-copy="{fmt}">{fmt}</span></span>'
+                f'<span class="az-up-chip bpm"><span>KBPS</span><span data-copy="{bitrate}">{bitrate}</span></span>'
+                f'<span class="az-up-chip"><span>LISTENERS</span><span data-copy="{listeners}">{listeners}</span></span>'
+            )
+
+            rows.append(
+                '<div class="az-item">'
+                '  <div class="az-up-item">'
+                '    <div class="az-up-head">'
+                '      <div class="az-up-main">'
+                f'        <div class="az-up-title" data-copy="{name}">{name}</div>'
+                f'        <div class="az-up-meta">{default_badge}{public_badge}{meta}</div>'
+                '      </div>'
+                '    </div>'
+                '  </div>'
+                '</div>'
+            )
+
+        return f'<div class="az-list">{"".join(rows)}</div>'
+
+    def _card_library(self) -> None:
+        with ui.element("div").classes("az-grid"):
+            with ui.element("div").classes("az-card"):
+                with ui.element("div").classes("az-card-h"):
+                    ui.label("AzuraCast Playlists")
+                    ui.button("Refresh", on_click=self.refresh_library).props("outline")
+                with ui.element("div").classes("az-card-b"):
+                    self._library_playlist_html = ui.html(
+                        '<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>'
+                    )
+
+            with ui.element("div").classes("az-card"):
+                with ui.element("div").classes("az-card-h"):
+                    ui.label("AzuraCast Mountpoints")
+                    ui.button("Refresh", on_click=self.refresh_library).props("outline")
+                with ui.element("div").classes("az-card-b"):
+                    self._library_mounts_html = ui.html(
+                        '<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>'
+                    )
+
+    async def refresh_library(self) -> None:
+        if self._library_busy:
+            return
+        self._library_busy = True
+        try:
+            playlists = await self._get_json("/azuracast/playlists")
+        except Exception as e:
+            playlists = {"ok": False, "error": str(e)}
+
+        try:
+            mounts = await self._get_json("/azuracast/mountpoints")
+        except Exception as e:
+            mounts = {"ok": False, "error": str(e)}
+
+        if self._library_playlist_html:
+            self._library_playlist_html.set_content(
+                self._library_playlists_html(playlists if isinstance(playlists, dict) else {})
+            )
+        if self._library_mounts_html:
+            self._library_mounts_html.set_content(
+                self._library_mountpoints_html(mounts if isinstance(mounts, dict) else {})
+            )
+
+        self._library_busy = False
+
     def build(self) -> None:
         ui.add_head_html(f"<style>{AZURA_CSS}</style>")
         ui.add_head_html(f"<script>window.azApiBase = {json.dumps(self.api_base)};</script>")
@@ -267,6 +419,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
                     "w-full"
                 ) as self._tabs:
                     ui.tab(self._tab_dashboard)
+                    ui.tab(self._tab_library)
                     ui.tab(self._tab_settings)
 
             with ui.tab_panels(self._tabs, value=self._tab_dashboard).classes("w-full"):
@@ -280,10 +433,14 @@ class ControlUI(SettingsMixin, DashboardMixin):
                     with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
                         self._card_logs()
 
+                with ui.tab_panel(self._tab_library):
+                    self._card_library()
+
                 with ui.tab_panel(self._tab_settings):
                     self._card_settings()
 
         ui.timer(0.1, self.refresh_dashboard, once=True)
+        ui.timer(0.15, self.refresh_library, once=True)
         ui.timer(0.2, self.refresh_settings, once=True)
 
     def _current_main_tab(self) -> str:
@@ -308,12 +465,21 @@ class ControlUI(SettingsMixin, DashboardMixin):
             await self.refresh_settings()
             return
 
+        if value == self._tab_library:
+            self.disable_autorefresh()
+            await self.refresh_library()
+            return
+
         self.enable_autorefresh()
         await self.refresh_dashboard()
 
     async def refresh_visible(self) -> None:
-        if self._current_main_tab() == self._tab_settings:
+        cur = self._current_main_tab()
+        if cur == self._tab_settings:
             await self.refresh_settings()
+            return
+        if cur == self._tab_library:
+            await self.refresh_library()
             return
 
         try:
