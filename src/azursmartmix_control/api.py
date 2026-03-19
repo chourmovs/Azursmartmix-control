@@ -1,23 +1,25 @@
+# src/azursmartmix_control/api.py
 from __future__ import annotations
 
 import os
 import re
 from typing import Any, Dict, List, Optional
 
+import requests
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from azursmartmix_control.config import Settings
-from azursmartmix_control.docker_client import DockerClient
-from azursmartmix_control.scheduler_client import SchedulerClient
 from azursmartmix_control.compose_reader import (
-    get_service_env,
     get_env_from_host_envfile,
+    get_service_env,
     set_env_in_host_envfile,
 )
+from azursmartmix_control.config import Settings
+from azursmartmix_control.docker_client import DockerClient
 from azursmartmix_control.icecast_client import IcecastClient
 from azursmartmix_control.runtime_queue_state import get_state
+from azursmartmix_control.scheduler_client import SchedulerClient
 
 
 def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
@@ -111,6 +113,85 @@ def create_api(settings: Settings) -> FastAPI:
         status_path=settings.icecast_status_path,
         mount=settings.icecast_mount,
     )
+
+    az_session = requests.Session()
+
+    def _az_base_url() -> str:
+        return str(settings.azuracast_base_url or "").strip().rstrip("/")
+
+    def _az_headers() -> Dict[str, str]:
+        headers: Dict[str, str] = {"Accept": "application/json"}
+        api_key = str(settings.azuracast_api_key or "").strip()
+        if api_key:
+            headers["X-API-Key"] = api_key
+        return headers
+
+    def _az_get_json(path: str) -> Any:
+        base_url = _az_base_url()
+        if not base_url:
+            raise RuntimeError("AZURACAST_BASE_URL is empty")
+
+        url = f"{base_url}{path}"
+        r = az_session.get(
+            url,
+            headers=_az_headers(),
+            timeout=float(settings.azuracast_timeout_s),
+            verify=bool(settings.azuracast_verify_tls),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(f"AzuraCast API error {r.status_code} for {url}: {r.text[:500]}")
+        return r.json() if r.content else []
+
+    def _as_records_list(payload: Any) -> List[Any]:
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            for key in ("records", "rows", "data", "result", "items"):
+                val = payload.get(key)
+                if isinstance(val, list):
+                    return val
+        raise ValueError("Unexpected AzuraCast payload shape; expected list-like response")
+
+    def _playlist_to_panel(item: Dict[str, Any]) -> Dict[str, Any]:
+        links = item.get("links") if isinstance(item.get("links"), dict) else {}
+        export = links.get("export") if isinstance(links.get("export"), dict) else {}
+
+        playlist_id = item.get("id")
+        try:
+            playlist_id = int(playlist_id) if playlist_id is not None else None
+        except Exception:
+            playlist_id = None
+
+        num_songs = item.get("num_songs")
+        try:
+            num_songs = int(num_songs) if num_songs is not None else None
+        except Exception:
+            num_songs = None
+
+        weight = item.get("weight")
+        try:
+            weight = int(weight) if weight is not None else None
+        except Exception:
+            weight = None
+
+        return {
+            "id": playlist_id,
+            "name": str(item.get("name") or "").strip(),
+            "short_name": str(item.get("short_name") or item.get("shortName") or "").strip() or None,
+            "slug": str(item.get("slug") or "").strip() or None,
+            "type": str(item.get("type") or "").strip() or None,
+            "source": str(item.get("source") or "").strip() or None,
+            "order": str(item.get("order") or "").strip() or None,
+            "weight": weight,
+            "is_enabled": bool(item.get("is_enabled") if item.get("is_enabled") is not None else True),
+            "is_jingle": bool(item.get("is_jingle") if item.get("is_jingle") is not None else False),
+            "num_songs": num_songs,
+            "backend_options": item.get("backend_options") if isinstance(item.get("backend_options"), dict) else None,
+            "schedule_items": item.get("schedule_items") if isinstance(item.get("schedule_items"), list) else [],
+            "links": links if links else None,
+            "export_m3u": str(export.get("m3u") or item.get("export_m3u") or item.get("exportM3U") or "").strip() or None,
+            "export_pls": str(export.get("pls") or item.get("export_pls") or item.get("exportPLS") or "").strip() or None,
+        }
 
     def _strict_icecast_title(ic_payload: Dict[str, Any]) -> Optional[str]:
         if not isinstance(ic_payload, dict) or not ic_payload.get("ok"):
@@ -291,6 +372,31 @@ def create_api(settings: Settings) -> FastAPI:
     @app.get("/status")
     def status() -> Dict[str, Any]:
         return docker_client.runtime_summary(settings.engine_container, settings.scheduler_container)
+
+    @app.get("/azuracast/playlists")
+    def azuracast_playlists() -> Dict[str, Any]:
+        station_id = int(settings.azuracast_station_id)
+
+        try:
+            payload = _az_get_json(f"/api/station/{station_id}/playlists")
+            rows = _as_records_list(payload)
+            items = [_playlist_to_panel(it) for it in rows if isinstance(it, dict)]
+            return {
+                "ok": True,
+                "source": "azuracast_api",
+                "station_id": station_id,
+                "total": len(items),
+                "items": items,
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "source": "azuracast_api",
+                "station_id": station_id,
+                "total": 0,
+                "items": [],
+                "error": str(e),
+            }
 
     @app.get("/logs", response_class=PlainTextResponse)
     def logs(
