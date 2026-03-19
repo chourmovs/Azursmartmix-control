@@ -105,9 +105,21 @@ class ControlUI(SettingsMixin, DashboardMixin):
         self._tab_library = "Library"
         self._tab_settings = "Settings"
 
-        self._library_playlist_html = None
+        self._library_playlist_container = None
         self._library_mounts_html = None
+        self._library_media_html = None
+        self._library_media_title = None
+        self._library_media_page_label = None
+        self._library_media_prev_btn = None
+        self._library_media_next_btn = None
         self._library_busy = False
+        self._library_playlists_rows: List[Dict[str, Any]] = []
+        self._library_selected_playlist_id: Optional[int] = None
+        self._library_selected_playlist_name: Optional[str] = None
+        self._library_media_page = 1
+        self._library_media_page_size = 50
+        self._library_media_total = 0
+        self._library_media_total_pages = 1
 
         self._settings_service = "engine"
         self._settings_advanced = False
@@ -218,63 +230,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
         except Exception:
             return False
 
-    # -------------------- Library (read-only, minimal) --------------------
-
-    def _library_playlists_html(self, data: Dict[str, Any]) -> str:
-        if not isinstance(data, dict) or not data.get("ok"):
-            err = html.escape(str((data or {}).get("error") or "—"))
-            return f'<div class="az-list"><div class="az-item"><span class="txt">error: {err}</span></div></div>'
-
-        items = data.get("items") or []
-        if not isinstance(items, list) or not items:
-            return '<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>'
-
-        rows: List[str] = []
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            name = html.escape(str(it.get("name") or "—"))
-            short_name = html.escape(str(it.get("short_name") or "—"))
-            ptype = html.escape(str(it.get("type") or "—"))
-            source = html.escape(str(it.get("source") or "—"))
-            order = html.escape(str(it.get("order") or "—"))
-            weight = html.escape(str(it.get("weight") if it.get("weight") is not None else "—"))
-            num_songs = html.escape(str(it.get("num_songs") if it.get("num_songs") is not None else "—"))
-            enabled = bool(it.get("is_enabled"))
-            jingle = bool(it.get("is_jingle"))
-            pid = html.escape(str(it.get("id") if it.get("id") is not None else "—"))
-
-            badges: List[str] = []
-            badges.append(
-                f'<span class="az-up-badge {"runtime" if enabled else ""}">{html.escape("ENABLED" if enabled else "DISABLED")}</span>'
-            )
-            if jingle:
-                badges.append('<span class="az-up-badge tempo">JINGLE</span>')
-
-            meta = (
-                f'<span class="az-up-chip playlist"><span>ID</span><span data-copy="{pid}">{pid}</span></span>'
-                f'<span class="az-up-chip"><span>SHORT</span><span data-copy="{short_name}">{short_name}</span></span>'
-                f'<span class="az-up-chip"><span>TYPE</span><span data-copy="{ptype}">{ptype}</span></span>'
-                f'<span class="az-up-chip"><span>SRC</span><span data-copy="{source}">{source}</span></span>'
-                f'<span class="az-up-chip"><span>ORDER</span><span data-copy="{order}">{order}</span></span>'
-                f'<span class="az-up-chip bpm"><span>TRACKS</span><span data-copy="{num_songs}">{num_songs}</span></span>'
-                f'<span class="az-up-chip delta"><span>W</span><span data-copy="{weight}">{weight}</span></span>'
-            )
-
-            rows.append(
-                '<div class="az-item">'
-                '  <div class="az-up-item">'
-                '    <div class="az-up-head">'
-                '      <div class="az-up-main">'
-                f'        <div class="az-up-title" data-copy="{name}">{name}</div>'
-                f'        <div class="az-up-meta">{"".join(badges)}{meta}</div>'
-                '      </div>'
-                '    </div>'
-                '  </div>'
-                '</div>'
-            )
-
-        return f'<div class="az-list">{"".join(rows)}</div>'
+    # -------------------- Library (read-only, paginated media explorer) --------------------
 
     def _library_mountpoints_html(self, data: Dict[str, Any]) -> str:
         if not isinstance(data, dict) or not data.get("ok"):
@@ -319,6 +275,151 @@ class ControlUI(SettingsMixin, DashboardMixin):
 
         return f'<div class="az-list">{"".join(rows)}</div>'
 
+    def _library_media_html_content(self, data: Dict[str, Any]) -> str:
+        if not self._library_selected_playlist_id:
+            return '<div class="az-list"><div class="az-item"><span class="txt">Select a playlist to browse its files.</span></div></div>'
+
+        if not isinstance(data, dict) or not data.get("ok"):
+            err = html.escape(str((data or {}).get("error") or "—"))
+            return f'<div class="az-list"><div class="az-item"><span class="txt">error: {err}</span></div></div>'
+
+        items = data.get("items") or []
+        if not isinstance(items, list) or not items:
+            return '<div class="az-list"><div class="az-item"><span class="txt">No files in this page.</span></div></div>'
+
+        rows: List[str] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+
+            mid = html.escape(str(it.get("id") if it.get("id") is not None else "—"))
+            title = html.escape(str(it.get("title_display") or it.get("title") or "—"))
+            artist = html.escape(str(it.get("artist") or "—"))
+            album = html.escape(str(it.get("album") or "—"))
+            path = html.escape(str(it.get("path") or "—"))
+            length_text = html.escape(str(it.get("length_text") or "—"))
+
+            playlist_names = it.get("playlist_names") or []
+            if isinstance(playlist_names, list):
+                playlist_names_txt = html.escape(", ".join(str(x) for x in playlist_names if x))
+            else:
+                playlist_names_txt = "—"
+
+            meta = (
+                f'<span class="az-up-chip playlist"><span>ID</span><span data-copy="{mid}">{mid}</span></span>'
+                f'<span class="az-up-chip bpm"><span>DUR</span><span data-copy="{length_text}">{length_text}</span></span>'
+                f'<span class="az-up-chip"><span>ARTIST</span><span data-copy="{artist}">{artist}</span></span>'
+                f'<span class="az-up-chip"><span>ALBUM</span><span data-copy="{album}">{album}</span></span>'
+            )
+
+            sub = (
+                f'<div class="az-up-sub">'
+                f'path: <span data-copy="{path}">{path}</span>'
+                f' <span class="t-dim">|</span> playlists: <span data-copy="{playlist_names_txt}">{playlist_names_txt}</span>'
+                f'</div>'
+            )
+
+            rows.append(
+                '<div class="az-item">'
+                '  <div class="az-up-item">'
+                '    <div class="az-up-head">'
+                '      <div class="az-up-main">'
+                f'        <div class="az-up-title" data-copy="{title}">{title}</div>'
+                f'        <div class="az-up-meta">{meta}</div>'
+                f'        {sub}'
+                '      </div>'
+                '    </div>'
+                '  </div>'
+                '</div>'
+            )
+
+        return f'<div class="az-list">{"".join(rows)}</div>'
+
+    def _render_library_playlists(self) -> None:
+        if self._library_playlist_container is None:
+            return
+
+        self._library_playlist_container.clear()
+
+        rows = self._library_playlists_rows or []
+        if not rows:
+            with self._library_playlist_container:
+                ui.html('<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>')
+            return
+
+        with self._library_playlist_container:
+            for it in rows:
+                pid = it.get("id")
+                name = str(it.get("name") or "—")
+                short_name = str(it.get("short_name") or "—")
+                ptype = str(it.get("type") or "—")
+                source = str(it.get("source") or "—")
+                order = str(it.get("order") or "—")
+                weight = str(it.get("weight") if it.get("weight") is not None else "—")
+                num_songs = str(it.get("num_songs") if it.get("num_songs") is not None else "—")
+                enabled = bool(it.get("is_enabled"))
+                jingle = bool(it.get("is_jingle"))
+                selected = pid == self._library_selected_playlist_id
+
+                with ui.element("div").classes("az-item"):
+                    with ui.element("div").classes("az-up-item"):
+                        with ui.element("div").classes("az-up-head"):
+                            with ui.element("div").classes("az-up-main"):
+                                row = ui.row().classes("items-center justify-between w-full")
+                                with row:
+                                    btn = ui.button(
+                                        name,
+                                        on_click=lambda _e=None, pid=pid, name=name: self._select_library_playlist(pid, name),
+                                    ).props("flat no-caps")
+                                    btn.classes("text-left")
+                                    btn.style(
+                                        "font-weight: 850; justify-content:flex-start; padding:0; min-height:auto; "
+                                        + ("color: var(--az-cyan);" if selected else "color: rgba(255,255,255,.96);")
+                                    )
+                                    with ui.row().classes("items-center gap-2"):
+                                        ui.html(
+                                            f'<span class="az-up-badge {"runtime" if enabled else ""}">{html.escape("ENABLED" if enabled else "DISABLED")}</span>'
+                                        )
+                                        if jingle:
+                                            ui.html('<span class="az-up-badge tempo">JINGLE</span>')
+                                        if selected:
+                                            ui.html('<span class="az-up-badge runtime">SELECTED</span>')
+
+                                ui.html(
+                                    '<div class="az-up-meta">'
+                                    f'<span class="az-up-chip playlist"><span>ID</span><span data-copy="{html.escape(str(pid if pid is not None else "—"))}">{html.escape(str(pid if pid is not None else "—"))}</span></span>'
+                                    f'<span class="az-up-chip"><span>SHORT</span><span data-copy="{html.escape(short_name)}">{html.escape(short_name)}</span></span>'
+                                    f'<span class="az-up-chip"><span>TYPE</span><span data-copy="{html.escape(ptype)}">{html.escape(ptype)}</span></span>'
+                                    f'<span class="az-up-chip"><span>SRC</span><span data-copy="{html.escape(source)}">{html.escape(source)}</span></span>'
+                                    f'<span class="az-up-chip"><span>ORDER</span><span data-copy="{html.escape(order)}">{html.escape(order)}</span></span>'
+                                    f'<span class="az-up-chip bpm"><span>TRACKS</span><span data-copy="{html.escape(num_songs)}">{html.escape(num_songs)}</span></span>'
+                                    f'<span class="az-up-chip delta"><span>W</span><span data-copy="{html.escape(weight)}">{html.escape(weight)}</span></span>'
+                                    '</div>'
+                                )
+
+    def _sync_library_media_controls(self) -> None:
+        title = "Playlist Files"
+        if self._library_selected_playlist_name:
+            title = f"Playlist Files — {self._library_selected_playlist_name}"
+        if self._library_media_title:
+            self._library_media_title.set_text(title)
+
+        label = f"Page {self._library_media_page}/{self._library_media_total_pages} • {self._library_media_total} files"
+        if self._library_media_page_label:
+            self._library_media_page_label.set_text(label)
+
+        if self._library_media_prev_btn:
+            if self._library_selected_playlist_id and self._library_media_page > 1:
+                self._library_media_prev_btn.enable()
+            else:
+                self._library_media_prev_btn.disable()
+
+        if self._library_media_next_btn:
+            if self._library_selected_playlist_id and self._library_media_page < self._library_media_total_pages:
+                self._library_media_next_btn.enable()
+            else:
+                self._library_media_next_btn.disable()
+
     def _card_library(self) -> None:
         with ui.element("div").classes("az-grid"):
             with ui.element("div").classes("az-card"):
@@ -326,9 +427,8 @@ class ControlUI(SettingsMixin, DashboardMixin):
                     ui.label("AzuraCast Playlists")
                     ui.button("Refresh", on_click=self.refresh_library).props("outline")
                 with ui.element("div").classes("az-card-b"):
-                    self._library_playlist_html = ui.html(
-                        '<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>'
-                    )
+                    self._library_playlist_container = ui.column().classes("w-full")
+                    self._render_library_playlists()
 
             with ui.element("div").classes("az-card"):
                 with ui.element("div").classes("az-card-h"):
@@ -338,6 +438,81 @@ class ControlUI(SettingsMixin, DashboardMixin):
                     self._library_mounts_html = ui.html(
                         '<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>'
                     )
+
+        with ui.element("div").classes("az-card").style("margin-top: 16px;"):
+            with ui.element("div").classes("az-card-h"):
+                self._library_media_title = ui.label("Playlist Files")
+                with ui.row().classes("items-center gap-2"):
+                    self._library_media_prev_btn = ui.button("Prev", on_click=self._library_prev_page).props("outline")
+                    self._library_media_next_btn = ui.button("Next", on_click=self._library_next_page).props("outline")
+                    self._library_media_page_label = ui.label("Page 1/1 • 0 files").classes("text-xs").style("opacity:.85;")
+            with ui.element("div").classes("az-card-b"):
+                self._library_media_html = ui.html(
+                    '<div class="az-list"><div class="az-item"><span class="txt">Select a playlist to browse its files.</span></div></div>'
+                )
+        self._sync_library_media_controls()
+
+    async def _select_library_playlist(self, playlist_id: Optional[int], playlist_name: str) -> None:
+        if playlist_id is None:
+            return
+        self._library_selected_playlist_id = int(playlist_id)
+        self._library_selected_playlist_name = str(playlist_name or "").strip() or f"Playlist {playlist_id}"
+        self._library_media_page = 1
+        self._render_library_playlists()
+        await self.refresh_library_media()
+
+    async def _library_prev_page(self) -> None:
+        if not self._library_selected_playlist_id or self._library_media_page <= 1:
+            return
+        self._library_media_page -= 1
+        await self.refresh_library_media()
+
+    async def _library_next_page(self) -> None:
+        if not self._library_selected_playlist_id or self._library_media_page >= self._library_media_total_pages:
+            return
+        self._library_media_page += 1
+        await self.refresh_library_media()
+
+    async def refresh_library_media(self) -> None:
+        if self._library_media_html is None:
+            return
+
+        if not self._library_selected_playlist_id:
+            self._library_media_total = 0
+            self._library_media_total_pages = 1
+            self._library_media_html.set_content(
+                '<div class="az-list"><div class="az-item"><span class="txt">Select a playlist to browse its files.</span></div></div>'
+            )
+            self._sync_library_media_controls()
+            return
+
+        path = (
+            "/azuracast/media?"
+            + urllib.parse.urlencode(
+                {
+                    "playlist_id": self._library_selected_playlist_id,
+                    "page": self._library_media_page,
+                    "page_size": self._library_media_page_size,
+                }
+            )
+        )
+
+        try:
+            data = await self._get_json(path)
+        except Exception as e:
+            data = {"ok": False, "error": str(e)}
+
+        self._library_media_total = int(data.get("total") or 0) if isinstance(data, dict) else 0
+        total_pages = int(data.get("total_pages") or 1) if isinstance(data, dict) else 1
+        self._library_media_total_pages = max(1, total_pages)
+
+        if self._library_media_page > self._library_media_total_pages:
+            self._library_media_page = self._library_media_total_pages
+
+        self._library_media_html.set_content(
+            self._library_media_html_content(data if isinstance(data, dict) else {})
+        )
+        self._sync_library_media_controls()
 
     async def refresh_library(self) -> None:
         if self._library_busy:
@@ -353,15 +528,26 @@ class ControlUI(SettingsMixin, DashboardMixin):
         except Exception as e:
             mounts = {"ok": False, "error": str(e)}
 
-        if self._library_playlist_html:
-            self._library_playlist_html.set_content(
-                self._library_playlists_html(playlists if isinstance(playlists, dict) else {})
-            )
+        if isinstance(playlists, dict) and playlists.get("ok") and isinstance(playlists.get("items"), list):
+            self._library_playlists_rows = [it for it in playlists.get("items") or [] if isinstance(it, dict)]
+        else:
+            self._library_playlists_rows = []
+
+        if self._library_selected_playlist_id is not None:
+            known_ids = {it.get("id") for it in self._library_playlists_rows}
+            if self._library_selected_playlist_id not in known_ids:
+                self._library_selected_playlist_id = None
+                self._library_selected_playlist_name = None
+                self._library_media_page = 1
+
+        self._render_library_playlists()
+
         if self._library_mounts_html:
             self._library_mounts_html.set_content(
                 self._library_mountpoints_html(mounts if isinstance(mounts, dict) else {})
             )
 
+        await self.refresh_library_media()
         self._library_busy = False
 
     def build(self) -> None:
