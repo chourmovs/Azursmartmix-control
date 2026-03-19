@@ -605,9 +605,16 @@ document.addEventListener('click', (ev) => {
 
   function nowMetaHTML(now){
     const playlistEff = now?.playlist_effective ? String(now.playlist_effective) : '—';
+
+    const bpmRuntimeNum = Number(now?.bpm_runtime);
+    const bpmRuntime = Number.isFinite(bpmRuntimeNum) ? bpmRuntimeNum.toFixed(2) : '—';
+
     const predicted = now && typeof now.predicted_next === 'object' ? now.predicted_next : null;
     const predTitle = predicted ? String(predicted.title_display || predicted.title || '—') : '—';
     const predPl = predicted ? String(predicted.playlist || '—') : '—';
+
+    const predBpmNum = Number(predicted?.bpm);
+    const predBpm = Number.isFinite(predBpmNum) ? predBpmNum.toFixed(2) : '—';
 
     const ss = now && typeof now.engine_stream_start === 'object' ? now.engine_stream_start : null;
     let hint = '';
@@ -621,14 +628,16 @@ document.addEventListener('click', (ev) => {
 
     return (
       '<div class="np-meta">' +
-      '<div class="np-line"><span class="np-k">playlist:</span> <span class="np-v" data-copy="' + esc(playlistEff) + '">' + esc(playlistEff) + '</span></div>' +
+      '<div class="np-line"><span class="np-k">playlist:</span> <span class="np-v" data-copy="' + esc(playlistEff) + '">' + esc(playlistEff) + '</span>' +
+      ' <span class="t-dim">|</span> <span class="np-k">bpm:</span> <span class="np-v" data-copy="' + esc(bpmRuntime) + '">' + esc(bpmRuntime) + '</span></div>' +
       '<div class="np-line"><span class="np-k">next(pred):</span> <span class="np-v" data-copy="' + esc(predTitle) + '">' + esc(predTitle) + '</span>' +
-      ' <span class="t-dim">|</span> <span class="np-k">pl:</span> <span class="np-v" data-copy="' + esc(predPl) + '">' + esc(predPl) + '</span></div>' +
+      ' <span class="t-dim">|</span> <span class="np-k">pl:</span> <span class="np-v" data-copy="' + esc(predPl) + '">' + esc(predPl) + '</span>' +
+      ' <span class="t-dim">|</span> <span class="np-k">bpm:</span> <span class="np-v" data-copy="' + esc(predBpm) + '">' + esc(predBpm) + '</span></div>' +
       '<div class="np-line">' + hint + '</div>' +
       '</div>'
     );
   }
-
+  
   function upcomingHTML(items){
     const arr = Array.isArray(items) ? items : [];
     if (!arr.length) {
@@ -639,12 +648,19 @@ document.addEventListener('click', (ev) => {
       const title = String(it?.title_display || it?.title || '—');
       const playlist = String(it?.playlist || '—');
       const ts = String(it?.ts || '');
+
       const delta = Number(it?.delta_pct);
       const deltaTxt = Number.isFinite(delta) ? delta.toFixed(2) + '%' : '';
+
+      const bpm = Number(it?.bpm);
+      const bpmTxt = Number.isFinite(bpm) ? bpm.toFixed(2) : '';
 
       const parts = [];
       if (playlist && playlist !== '—') {
         parts.push('<span class="t-cyan t-bold" data-copy="' + esc(playlist) + '">' + esc(playlist) + '</span>');
+      }
+      if (bpmTxt) {
+        parts.push('<span class="t-dim">bpm</span> <span class="t-ok t-bold">' + esc(bpmTxt) + '</span>');
       }
       if (deltaTxt) {
         parts.push('<span class="t-dim">Δ</span> <span class="t-ok t-bold">' + esc(deltaTxt) + '</span>');
@@ -663,7 +679,6 @@ document.addEventListener('click', (ev) => {
       );
     }).join('');
   }
-
   function logsHTML(text){
     return '<div class="console-content">' + esc(text || '—') + '</div>';
   }
