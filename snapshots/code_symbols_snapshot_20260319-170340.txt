@@ -1,0 +1,444 @@
+# Snapshot: file tree + symbol index (Python AST)
+
+## Arborescence du dépôt
+
+  - Dockerfile
+  - README.md
+  - docker-compose.yml
+  - pyproject.toml
+  - src/
+    - src/azursmartmix_control/
+      - __init__.py
+      - api.py
+      - azursmartmix_env_reference_v2.csv
+      - compose_reader.py
+      - config.py
+      - docker_base.py
+      - docker_client.py
+      - docker_log_parsing.py
+      - docker_models.py
+      - icecast_client.py
+      - main.py
+      - runtime_queue_state.py
+      - scheduler_client.py
+      - ui.py
+      - ui_assets.py
+      - ui_dashboard.py
+      - ui_dashboard_js.py
+      - ui_player_js.py
+      - ui_settings.py
+      - ui_theme_assets.py
+
+---
+## Index des modules Python
+
+- src/azursmartmix_control/__init__.py
+- src/azursmartmix_control/api.py
+- src/azursmartmix_control/compose_reader.py
+- src/azursmartmix_control/config.py
+- src/azursmartmix_control/docker_base.py
+- src/azursmartmix_control/docker_client.py
+- src/azursmartmix_control/docker_log_parsing.py
+- src/azursmartmix_control/docker_models.py
+- src/azursmartmix_control/icecast_client.py
+- src/azursmartmix_control/main.py
+- src/azursmartmix_control/runtime_queue_state.py
+- src/azursmartmix_control/scheduler_client.py
+- src/azursmartmix_control/ui.py
+- src/azursmartmix_control/ui_assets.py
+- src/azursmartmix_control/ui_dashboard.py
+- src/azursmartmix_control/ui_dashboard_js.py
+- src/azursmartmix_control/ui_player_js.py
+- src/azursmartmix_control/ui_settings.py
+- src/azursmartmix_control/ui_theme_assets.py
+
+
+---
+## Détails par module
+
+---
+# src/azursmartmix_control/__init__.py
+
+module vars:
+  - __all__ = ['__version__']
+  - __version__ = '0.1.0'
+
+---
+# src/azursmartmix_control/api.py
+
+imports:
+  - from __future__ import annotations
+  - from azursmartmix_control.compose_reader import get_service_env, get_env_from_host_envfile, set_env_in_host_envfile
+  - from azursmartmix_control.config import Settings
+  - from azursmartmix_control.docker_client import DockerClient
+  - from azursmartmix_control.icecast_client import IcecastClient
+  - from azursmartmix_control.runtime_queue_state import get_state
+  - from azursmartmix_control.scheduler_client import SchedulerClient
+  - from fastapi import FastAPI, Query
+  - from fastapi.responses import JSONResponse, PlainTextResponse
+  - from pydantic import BaseModel, Field
+  - from typing import Any, Dict, List, Optional
+  - import os
+  - import re
+
+module vars:
+  - _RE_SAFE_TAG = re.compile('^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')
+
+functions:
+  - def _build_image_ref(settings: Settings, tag: Optional[str]) -> str
+  - def _display_title_or_none(value: Any) -> Optional[str]
+  - def _fmt_cmd_result(r: Dict[str, Any]) -> str
+  - def _fmt_duration(seconds: Optional[int]) -> Optional[str]
+  - def create_api(settings: Settings) -> FastAPI
+
+classes:
+  - class ComposeEnvSaveRequest(BaseModel)
+
+
+---
+# src/azursmartmix_control/compose_reader.py
+
+imports:
+  - from __future__ import annotations
+  - from typing import Any, Dict, List, Tuple
+  - import datetime as dt
+  - import os
+  - import re
+
+module vars:
+  - _RE_ENV_KV = re.compile('^\\s*(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(.*)$')
+
+functions:
+  - def _backup_file(path: str) -> str
+  - def _denormalize_env(env_map: Dict[str, str], prefer: str) -> Any  # Convert back to compose environment format.
+  - def _dump_compose(path: str, data: Dict[str, Any]) -> None
+  - def _format_dotenv_value(v: str) -> str  # Format a dotenv value. Quote only when needed (spaces, #, quotes).
+  - def _load_compose(path: str) -> Dict[str, Any]
+  - def _normalize_env(env: Any) -> Dict[str, str]  # Normalize compose 'environment' which can be:
+  - def _parse_dotenv_lines(lines: List[str]) -> Tuple[Dict[str, str], Dict[str, int]]  # Return (env_map, key_to_line_index) for KEY=VALUE lines.
+  - def _parse_dotenv_value(raw: str) -> str  # Parse a dotenv value. Conservative: avoid stripping inline comments (passwords may contain '#').
+  - def _read_text_lines(path: str) -> List[str]
+  - def _require_yaml()
+  - def _write_text_lines_atomic(path: str, lines: List[str]) -> None
+  - def get_env_from_host_envfile(env_file_path: str) -> Dict[str, Any]  # Read env from host dotenv file (mounted into container).
+  - def get_service_env(compose_path: str, service_name: str) -> Dict[str, Any]  # Existing helper used by UI (read-only). Returns structured env from compose_path.
+  - def get_service_env_from_host_compose(host_compose_path: str, service_name: str) -> Dict[str, Any]  # Read env from host compose file (mounted into container).
+  - def set_env_in_host_envfile(env_file_path: str, env_updates: Dict[str, str]) -> Dict[str, Any]  # Merge-update env_file_path with env_updates.
+  - def set_service_env_in_host_compose(host_compose_path: str, service_name: str, env_map: Dict[str, str], env_format_prefer: str) -> Dict[str, Any]  # Legacy writer: Write env_map into services[service_name].environment of the compose file.
+
+---
+# src/azursmartmix_control/config.py
+
+imports:
+  - from __future__ import annotations
+  - from pydantic import Field
+  - from pydantic_settings import BaseSettings, SettingsConfigDict
+
+functions:
+  - def get_settings() -> Settings
+
+classes:
+  - class Settings(BaseSettings)  # Runtime settings for the control plane.
+
+
+---
+# src/azursmartmix_control/docker_base.py
+
+imports:
+  - from __future__ import annotations
+  - from docker.errors import DockerException, NotFound
+  - from typing import Any, Dict, List, Optional, Tuple
+  - import datetime as dt
+  - import docker
+  - import os
+  - import re
+  - import shlex
+  - import subprocess
+  - import time
+  - import urllib.parse
+
+classes:
+  - class DockerBase  # Socle runtime Docker + helpers communs de parsing/normalisation.
+      * method __init__(self) -> None
+      * method _ok_or_error(txt: str, source: str, container_key: str, container_name: str) -> Optional[Dict[str, Any]] @staticmethod
+      * method _parse_dt(v: Optional[str]) -> Optional[dt.datetime] @staticmethod
+      * method _parse_sched_ts(v: Optional[str]) -> Optional[dt.datetime] @staticmethod
+      * method _extract_log_ts_raw(line: str) -> Optional[str] @staticmethod
+      * method _extract_float_from_line(rx: re.Pattern[str], line: str) -> Optional[float] @staticmethod
+      * method _extract_attempt_from_line(line: str) -> Optional[str] @staticmethod
+      * method _bpm_or_none(v: Any) -> Optional[float] @staticmethod
+      * method _strip_docker_prefix(line: str) -> str @staticmethod
+      * method _coerce_rel_title(rel: str) -> Optional[str] @staticmethod
+      * method display_title(s: str) -> str @staticmethod
+      * method normalize_title(s: str) -> str @staticmethod
+      * method _dedupe_keep_order(items: List[str]) -> List[str] @staticmethod
+      * method _iter_clean_log_lines(self, name: str, tail: int) -> Tuple[str, List[str]]
+      * method _slice_from_current(items: List[Dict[str, Any]], current_norm: str, norm_key: str, n: int, fallback_mult: int, source_after: str, source_fallback: str, current_title: Optional[str]) -> Dict[str, Any] @staticmethod
+      * method _run_cmd(cmd: List[str], cwd: str, timeout_s: int) -> Dict[str, Any] @staticmethod
+      * method compose_down(self, azuramix_dir: str) -> Dict[str, Any]
+      * method compose_up(self, azuramix_dir: str) -> Dict[str, Any]
+      * method compose_recreate(self, azuramix_dir: str) -> Dict[str, Any]
+      * method compose_update(self, azuramix_dir: str, image_ref: str) -> Dict[str, Any]
+      * method _get_container(self, name: str)
+      * method inspect_container(self, name: str) -> Dict[str, Any]
+      * method runtime_summary(self, engine_container: str, scheduler_container: str) -> Dict[str, Any]
+      * method tail_logs(self, name: str, tail: int) -> str
+      * method _read_proc_stat() -> Optional[Tuple[int, int]] @staticmethod
+      * method _sample_host_cpu_percent(self) -> Optional[float]
+      * method _read_loadavg() -> Dict[str, Optional[float]] @staticmethod
+      * method _read_meminfo() -> Dict[str, Optional[int]] @staticmethod
+      * method host_resources_summary(self) -> Dict[str, Any]
+      * method _playback_title_from_uri(raw: str) -> Optional[str] @staticmethod
+      * method _playback_state_from_uri(cls, raw: str) -> Dict[str, Any] @classmethod
+      * method _clean_preprocess_title(self, rest: str) -> Optional[str]
+
+
+---
+# src/azursmartmix_control/docker_client.py
+
+imports:
+  - from .docker_log_parsing import DockerLogParsingMixin
+  - from __future__ import annotations
+
+classes:
+  - class DockerClient(DockerLogParsingMixin)  # Façade publique stable.
+
+
+---
+# src/azursmartmix_control/docker_log_parsing.py
+
+imports:
+  - from .docker_base import DockerBase
+  - from .docker_models import NextEntry, TempoAcceptEntry, TempoEvent
+  - from __future__ import annotations
+  - from typing import Any, Dict, List, Optional, Tuple
+  - import ast
+  - import datetime as dt
+
+classes:
+  - class DockerLogParsingMixin(DockerBase)  # Parsing métier des logs engine/scheduler, isolé du runtime Docker.
+      * method _anchor_index_for_current(events: List[TempoEvent], cur_norm: str) -> Tuple[Optional[int], bool] @staticmethod
+      * method extract_tempo_selected_titles(self, engine_container: str, tail: int) -> Dict[str, Any]
+      * method extract_tempo_runtime_state(self, engine_container: str, tail: int) -> Dict[str, Any]
+      * method extract_tempo_event_stream(self, engine_container: str, tail: int) -> Dict[str, Any]
+      * method extract_tempo_accept_entries(self, engine_container: str, tail: int) -> Dict[str, Any]
+      * method compute_upcoming_from_tempo_accepts(self, engine_container: str, current_title: Optional[str], n: int, tail: int) -> Dict[str, Any]
+      * method extract_preprocess_titles(self, engine_container: str, tail: int) -> Dict[str, Any]
+      * method compute_upcoming_from_preprocess(self, engine_container: str, current_title: Optional[str], n: int, tail: int) -> Dict[str, Any]
+      * method extract_scheduler_next_entries(self, scheduler_container: str, tail: int) -> Dict[str, Any]
+      * method infer_playlist_for_title_from_scheduler(self, scheduler_container: str, current_title: Optional[str], tail: int) -> Dict[str, Any]
+      * method compute_upcoming_from_scheduler_next(self, scheduler_container: str, current_title: Optional[str], n: int, tail: int) -> Dict[str, Any]
+      * method last_engine_stream_start(self, engine_container: str, tail: int, recent_window_s: int) -> Dict[str, Any]
+
+
+---
+# src/azursmartmix_control/docker_models.py
+
+imports:
+  - from __future__ import annotations
+  - from dataclasses import dataclass
+  - from typing import Optional
+  - import datetime as dt
+
+classes:
+  - class ContainerInfo
+
+  - class NextEntry
+
+  - class TempoAcceptEntry
+
+  - class TempoEvent
+
+
+---
+# src/azursmartmix_control/icecast_client.py
+
+imports:
+  - from __future__ import annotations
+  - from typing import Any, Dict, Optional
+  - import httpx
+
+classes:
+  - class IcecastClient  # Read-only Icecast status client (best-effort).
+      * method __init__(self, scheme: str, host: str, port: int, status_path: str, mount: str) -> None
+      * method _base(self) -> str
+      * async method fetch_status(self) -> Dict[str, Any]
+      * method _iter_sources(payload: Dict[str, Any]) @staticmethod
+      * async method now_playing(self) -> Dict[str, Any]
+
+
+---
+# src/azursmartmix_control/main.py
+
+imports:
+  - from __future__ import annotations
+  - from azursmartmix_control.api import create_api
+  - from azursmartmix_control.config import get_settings
+  - from azursmartmix_control.ui import ControlUI
+  - from fastapi import FastAPI
+  - from nicegui import app, ui
+  - from pythonjsonlogger import jsonlogger
+  - import logging
+
+functions:
+  - def main() -> int
+  - def setup_logging() -> None
+
+---
+# src/azursmartmix_control/runtime_queue_state.py
+
+imports:
+  - from __future__ import annotations
+  - from typing import Any, Dict
+  - import json
+  - import os
+  - import subprocess
+  - import threading
+
+module vars:
+  - ENGINE_CONTAINER = os.getenv('AZURSMARTMIX_ENGINE_CONTAINER', 'azursmartmix_engine')
+  - QUEUE_STATE_PATH = '/tmp/azurmix_queue_state.txt'
+  - _lock = threading.Lock()
+
+functions:
+  - def _empty_state() -> Dict[str, Any]
+  - def _normalize_state(data: Any) -> Dict[str, Any]
+  - def _read_engine_container_state() -> Dict[str, Any]  # Conservative fallback:
+  - def _read_local_state() -> Dict[str, Any]
+  - def get_state() -> Dict[str, Any]
+
+---
+# src/azursmartmix_control/scheduler_client.py
+
+imports:
+  - from __future__ import annotations
+  - from typing import Any, Dict, Optional
+  - import httpx
+
+classes:
+  - class SchedulerClient  # Proxy client to AzurSmartMix scheduler API.
+      * method __init__(self, base_url: str, now_endpoint: Optional[str]) -> None
+      * async method health(self) -> Dict[str, Any]
+      * async method now_playing(self) -> Dict[str, Any]  # Now playing via scheduler IF configured.
+      * async method upcoming(self, n: int) -> Dict[str, Any]  # Best-effort upcoming queue.
+      * async method _try_get_json(self, path: str) -> Optional[Any]
+      * method _safe_json(r: httpx.Response) -> Any @staticmethod
+
+
+---
+# src/azursmartmix_control/ui.py
+
+classes:
+  - [SyntaxError] f-string expression part cannot include a backslash (ui.py, line 414)
+
+---
+# src/azursmartmix_control/ui_assets.py
+
+imports:
+  - from __future__ import annotations
+  - from azursmartmix_control.ui_dashboard_js import AZURA_DASHBOARD_JS
+  - from azursmartmix_control.ui_player_js import AZURA_PLAYER_JS
+  - from azursmartmix_control.ui_theme_assets import AZURA_CSS
+
+module vars:
+  - AZURA_JS = AZURA_DASHBOARD_JS + '\n\n' + AZURA_PLAYER_JS
+
+---
+# src/azursmartmix_control/ui_dashboard.py
+
+imports:
+  - from __future__ import annotations
+  - from nicegui import ui
+  - from typing import Any, Dict, List
+  - import html
+  - import uuid
+
+classes:
+  - class DashboardMixin
+      * method _card_runtime(self) -> None
+      * method _runtime_box(self, title: str, html_id: str)
+      * method _runtime_table_html(self, data: Dict[str, Any]) -> str
+      * method _card_resources(self) -> None
+      * method _fmt_bytes_gb(value: Any) -> str @staticmethod
+      * method _resources_cpu_html(self, data: Dict[str, Any]) -> str
+      * method _resources_mem_html(self, data: Dict[str, Any]) -> str
+      * method _card_now(self) -> None
+      * method _now_meta_html(self, now: Dict[str, Any]) -> str
+      * method _player_html(self, url: str) -> str
+      * method _card_upcoming(self) -> None
+      * method _card_logs(self) -> None
+      * method _apply_resources_payload(self, data: Dict[str, Any]) -> None
+      * method _apply_runtime_payload(self, rt: Dict[str, Any]) -> None
+      * method _apply_now_payload(self, now: Dict[str, Any]) -> None
+      * method _apply_upcoming_payload(self, up: Dict[str, Any]) -> None
+      * method _apply_logs_payload(self, engine_text: str, scheduler_text: str) -> None
+      * async method refresh_dashboard(self) -> None
+      * async method refresh_resources(self) -> None
+      * async method refresh_runtime(self) -> None
+      * method _set_docker_badge(self, ok: bool, text: str) -> None
+      * async method refresh_now(self) -> None
+      * async method refresh_upcoming(self) -> None
+      * async method refresh_logs(self) -> None
+
+
+---
+# src/azursmartmix_control/ui_dashboard_js.py
+
+imports:
+  - from __future__ import annotations
+
+module vars:
+  - AZURA_DASHBOARD_JS = '\ndocument.addEventListener(\'click\', (ev) => {\n  const el = ev.target.closest(\'[data-copy]\');\n  if (!el) return;\n  const txt = el.getAttribute(\'data-copy\') || el.textContent || \'\';\n  if (!txt) return;\n  navigator.clipboard.writeText(txt).catch(()=>{});\n});\n\n(function(){\n  function esc(value){\n    return String(value ?? \'\')\n      .replaceAll(\'&\', \'&amp;\')\n      .replaceAll(\'<\', \'&lt;\')\n      .replaceAll(\'>\', \'&gt;\')\n      .replaceAll(\'"\', \'&quot;\')\n      .replaceAll("\'", \'&#39;\');\n  }\n\n  const API_BASE = String(window.azApiBase || \'/api\').replace(/\\/+$/, \'\');\n\n  function apiUrl(path){\n    const p = String(path || \'\');\n    if (!p) return API_BASE;\n    return p.startsWith(\'/\') ? (API_BASE + p) : (API_BASE + \'/\' + p);\n  }\n\n  function setHTML(id, html){\n    const el = document.getElementById(id);\n    if (el) el.innerHTML = html;\n  }\n\n  function setText(id, text){\n    const el = document.getElementById(id);\n    if (el) el.textContent = String(text ?? \'\');\n  }\n\n  function fmtBytesGb(value){\n    const n = Number(value);\n    if (!Number.isFinite(n) || n <= 0) return \'0.00 GB\';\n    return (n / (1024 ** 3)).toFixed(2) + \' GB\';\n  }\n\n  function runtimeTableHTML(data){\n    const x = data && typeof data === \'object\' ? data : {};\n    const rows = [\n      [\'name\', x.name ?? \'—\'],\n      [\'image\', x.image ?? \'—\'],\n      [\'status\', x.status ?? \'—\'],\n      [\'health\', x.health ?? \'-\'],\n      [\'uptime\', x.uptime ?? \'-\'],\n    ];\n    return \'<table class="rt-table">\' + rows.map(([k, v]) => (\n      \'<tr><td class="rt-k">\' + esc(k) + \'</td><td class="rt-v" data-copy="\' + esc(v) + \'">\' + esc(v) + \'</td></tr>\'\n    )).join(\'\') + \'</table>\';\n  }\n\n  function resourcesCPUHTML(data){\n    const cpu = data && typeof data.cpu === \'object\' ? data.cpu : {};\n    const loadavg = data && typeof data.loadavg === \'object\' ? data.loadavg : {};\n    const pct = Number(cpu.percent);\n    const pctNum = Number.isFinite(pct) ? pct : 0.0;\n    const pctTxt = Number.isFinite(pct) ? pctNum.toFixed(2) : \'—\';\n    const l1 = Number(loadavg.one);\n    const l5 = Number(loadavg.five);\n    const loadTxt = Number.isFinite(l1) && Number.isFinite(l5) ? (l1.toFixed(2) + \' / \' + l5.toFixed(2)) : \'—\';\n    const width = Math.max(0, Math.min(100, pctNum));\n\n    return (\n      \'<div class="res-box">\' +\n      \'<div class="res-box-h"><span>CPU</span><span class="mini">load 1/5m</span></div>\' +\n      \'<div class="res-top">\' +\n      \'<div class="res-big">\' + esc(pctTxt) + \'<span class="unit">%</span></div>\' +\n      \'<div class="res-sub">\' + esc(loadTxt) + \'</div>\' +\n      \'</div>\' +\n      \'<div class="res-bar res-bar-cpu"><span style="width:\' + width.toFixed(2) + \'%;"></span></div>\' +\n      \'<div class="res-kpis">\' +\n      \'<div><span class="t-dim">sample</span> <span class="v">\' + esc(cpu.sample ?? \'—\') + \'</span></div>\' +\n      \'<div><span class="t-dim">source</span> <span class="v">\' + esc(data?.source ?? \'—\') + \'</span></div>\' +\n      \'</div>\' +\n      \'</div>\'\n    );\n  }\n\n  function resourcesMemHTML(data){\n    const mem = data && typeof data.memory === \'object\' ? data.memory : {};\n    const pct = Number(mem.used_percent);\n    const pctNum = Number.isFinite(pct) ? pct : 0.0;\n    const pctTxt = Number.isFinite(pct) ? pctNum.toFixed(2) : \'—\';\n    const width = Math.max(0, Math.min(100, pctNum));\n\n    return (\n      \'<div class="res-box">\' +\n      \'<div class="res-box-h"><span>Memory</span><span class="mini">used / total</span></div>\' +\n      \'<div class="res-top">\' +\n      \'<div class="res-big">\' + esc(fmtBytesGb(mem.used_bytes)) + \'</div>\' +\n      \'<div class="res-sub">\' + esc(pctTxt) + \'%</div>\' +\n      \'</div>\' +\n      \'<div class="res-bar res-bar-mem"><span style="width:\' + width.toFixed(2) + \'%;"></span></div>\' +\n      \'<div class="res-grid">\' +\n      \'<div class="res-kpis"><div><span class="t-dim">total</span> <span class="v">\' + esc(fmtBytesGb(mem.total_bytes)) + \'</span></div><div><span class="t-dim">avail</span> <span class="v">\' + esc(fmtBytesGb(mem.available_bytes)) + \'</span></div></div>\' +\n      \'<div class="res-kpis"><div><span class="t-dim">cached</span> <span class="v">\' + esc(fmtBytesGb(mem.cached_bytes)) + \'</span></div><div><span class="t-dim">used</span> <span class="v">\' + esc(pctTxt) + \'%</span></div></div>\' +\n      \'</div>\' +\n      \'</div>\'\n    );\n  }\n\n  function nowMetaHTML(now){\n    const playlistEff = now?.playlist_effective ? String(now.playlist_effective) : \'—\';\n\n    const bpmRuntimeNum = Number(now?.bpm_runtime);\n    const bpmRuntime = Number.isFinite(bpmRuntimeNum) ? bpmRuntimeNum.toFixed(2) : \'—\';\n\n    const predicted = now && typeof now.predicted_next === \'object\' ? now.predicted_next : null;\n    const predTitle = predicted ? String(predicted.title_display || predicted.title || \'—\') : \'—\';\n    const predPl = predicted ? String(predicted.playlist || \'—\') : \'—\';\n\n    const predBpmNum = Number(predicted?.bpm);\n    const predBpm = Number.isFinite(predBpmNum) ? predBpmNum.toFixed(2) : \'—\';\n\n    const ss = now && typeof now.engine_stream_start === \'object\' ? now.engine_stream_start : null;\n    let hint = \'\';\n    if (ss && ss.ok && ss.recent) {\n      const ageTxt = Number.isInteger(ss.age_s) ? (String(ss.age_s) + \'s\') : \'recent\';\n      hint = \'<span class="np-pill"><span class="t-ok t-bold">STREAM_START</span><span class="t-dim">(\' + esc(ageTxt) + \')</span></span>\';\n    } else if (ss && ss.ok && ss.line) {\n      const ageTxt = Number.isInteger(ss.age_s) ? (String(ss.age_s) + \'s\') : \'\';\n      hint = \'<span class="np-pill"><span class="t-dim">last STREAM_START</span><span class="t-dim">\' + esc(ageTxt) + \'</span></span>\';\n    }\n\n    return (\n      \'<div class="np-meta">\' +\n      \'<div class="np-line"><span class="np-k">playlist:</span> <span class="np-v" data-copy="\' + esc(playlistEff) + \'">\' + esc(playlistEff) + \'</span>\' +\n      \' <span class="t-dim">|</span> <span class="np-k">bpm:</span> <span class="np-v" data-copy="\' + esc(bpmRuntime) + \'">\' + esc(bpmRuntime) + \'</span></div>\' +\n      \'<div class="np-line"><span class="np-k">next(pred):</span> <span class="np-v" data-copy="\' + esc(predTitle) + \'">\' + esc(predTitle) + \'</span>\' +\n      \' <span class="t-dim">|</span> <span class="np-k">pl:</span> <span class="np-v" data-copy="\' + esc(predPl) + \'">\' + esc(predPl) + \'</span>\' +\n      \' <span class="t-dim">|</span> <span class="np-k">bpm:</span> <span class="np-v" data-copy="\' + esc(predBpm) + \'">\' + esc(predBpm) + \'</span></div>\' +\n      \'<div class="np-line">\' + hint + \'</div>\' +\n      \'</div>\'\n    );\n  }\n\n  function detectUpcomingSource(it){\n    const hasBpm = Number.isFinite(Number(it?.bpm));\n    const hasDelta = Number.isFinite(Number(it?.delta_pct));\n    if (hasDelta && !hasBpm) return \'tempo\';\n    if (hasBpm) return \'runtime\';\n    return \'mixed\';\n  }\n\n  function upcomingSourceBadge(source){\n    if (source === \'runtime\') {\n      return \'<span class="az-up-badge runtime">RUNTIME</span>\';\n    }\n    if (source === \'tempo\') {\n      return \'<span class="az-up-badge tempo">TEMPO</span>\';\n    }\n    return \'<span class="az-up-badge">MERGED</span>\';\n  }\n\n  function chip(cls, label, value){\n    return \'<span class="az-up-chip \' + esc(cls) + \'"><span>\' + esc(label) + \'</span><span data-copy="\' + esc(value) + \'">\' + esc(value) + \'</span></span>\';\n  }\n\n  function upcomingHTML(items){\n    const arr = Array.isArray(items) ? items : [];\n    if (!arr.length) {\n      return \'<div style="opacity:.7;">—</div>\';\n    }\n\n    return arr.map((it, idx) => {\n      const source = detectUpcomingSource(it);\n      const title = String(it?.title_display || it?.title || \'—\');\n      const playlist = String(it?.playlist || \'\').trim();\n      const ts = String(it?.ts || \'\').trim();\n      const fromTitle = String(it?.from_title || \'\').trim();\n\n      const bpm = Number(it?.bpm);\n      const bpmTxt = Number.isFinite(bpm) ? bpm.toFixed(2) : \'\';\n\n      const delta = Number(it?.delta_pct);\n      const deltaTxt = Number.isFinite(delta) ? delta.toFixed(2) + \'%\' : \'\';\n\n      const metaParts = [];\n      metaParts.push(upcomingSourceBadge(source));\n\n      if (playlist) {\n        metaParts.push(chip(\'playlist\', \'PL\', playlist));\n      }\n      if (bpmTxt) {\n        metaParts.push(chip(\'bpm\', \'BPM\', bpmTxt));\n      }\n      if (deltaTxt) {\n        metaParts.push(chip(\'delta\', \'Δtempo\', deltaTxt));\n      }\n      if (ts) {\n        metaParts.push(chip(\'ts\', \'TS\', ts));\n      }\n\n      let sub = \'\';\n      if (source === \'tempo\' && fromTitle) {\n        sub = \'<div class="az-up-sub">transition from <span data-copy="\' + esc(fromTitle) + \'">\' + esc(fromTitle) + \'</span></div>\';\n      }\n\n      return (\n        \'<div class="az-item">\' +\n          \'<div class="az-up-item">\' +\n            \'<div class="az-up-head">\' +\n              \'<div class="az-up-idx">\' + (idx + 1) + \'.</div>\' +\n              \'<div class="az-up-main">\' +\n                \'<div class="az-up-title" data-copy="\' + esc(title) + \'">\' + esc(title) + \'</div>\' +\n                \'<div class="az-up-meta">\' + metaParts.join(\'\') + \'</div>\' +\n              \'</div>\' +\n            \'</div>\' +\n            sub +\n          \'</div>\' +\n        \'</div>\'\n      );\n    }).join(\'\');\n  }\n\n  function logsHTML(text){\n    return \'<div class="console-content">\' + esc(text || \'—\') + \'</div>\';\n  }\n\n  function syncBadgeHTML(state, ageSec){\n    const safeAge = Number.isFinite(ageSec) ? Math.max(0, ageSec) : 0;\n    if (state === \'ok\') {\n      return \'<span class="az-badge"><span class="az-dot ok"></span><span>Sync: \' + safeAge.toFixed(0) + \'s</span></span>\';\n    }\n    if (state === \'warn\') {\n      return \'<span class="az-badge" style="border-color: rgba(245,158,11,.55); background: rgba(245,158,11,.15);"><span class="az-dot warn"></span><span>Sync delayed</span></span>\';\n    }\n    return \'<span class="az-badge" style="border-color: rgba(239,68,68,.55); background: rgba(239,68,68,.15);"><span class="az-dot err"></span><span>Sync error</span></span>\';\n  }\n\n  function applyMainPayload(payload){\n    const resources = payload?.resources ?? {};\n    const runtime = payload?.runtime ?? {};\n    const now = payload?.now ?? {};\n    const upcoming = payload?.upcoming ?? {};\n\n    setHTML(\'res_host_meta\', \'<span class="res-pill">source: \' + esc(resources.source || \'host\') + \'</span>\');\n    setHTML(\'res_cpu_html\', resourcesCPUHTML(resources));\n    setHTML(\'res_mem_html\', resourcesMemHTML(resources));\n\n    setHTML(\n      \'docker_badge\',\n      \'<span class="az-badge"><span class="az-dot \' + (runtime?.docker_ping ? \'ok\' : \'err\') + \'"></span><span>Docker: \' + (runtime?.docker_ping ? \'OK\' : \'DOWN\') + \'</span></span>\'\n    );\n    setHTML(\'rt_engine_tbl\', runtimeTableHTML(runtime.engine || {}));\n    setHTML(\'rt_sched_tbl\', runtimeTableHTML(runtime.scheduler || {}));\n\n    setText(\'np_title\', now?.title_effective || now?.title_observed || \'—\');\n    setHTML(\'np_meta\', nowMetaHTML(now));\n    setText(\'np_sources\', \'Sources: \' + String(now?.source || \'Icecast metadata only\').trim());\n\n    const upSource = upcoming && typeof upcoming.source === \'object\' ? upcoming.source.primary : null;\n    setText(\'up_source\', String(upSource || \'engine_logs_tempo_accept_after_current\'));\n    setHTML(\'upcoming_list\', upcomingHTML(upcoming?.upcoming || []));\n  }\n\n  function applyLogs(engineText, schedulerText){\n    setHTML(\'log_engine\', logsHTML(engineText));\n    setHTML(\'log_sched\', logsHTML(schedulerText));\n  }\n\n  const state = {\n    running: false,\n    mainInflight: false,\n    logsInflight: false,\n    mainTimer: null,\n    logsTimer: null,\n    lastOkTs: 0,\n  };\n\n  async function fetchJSON(path){\n    const u = apiUrl(path) + (String(path).includes(\'?\') ? \'&\' : \'?\') + \'_ts=\' + Date.now();\n    const r = await fetch(u, {\n      method: \'GET\',\n      cache: \'no-store\',\n      headers: { \'Cache-Control\': \'no-cache\' },\n    });\n    if (!r.ok) throw new Error(\'http \' + r.status);\n    return await r.json();\n  }\n\n  async function fetchText(path){\n    const u = apiUrl(path) + (String(path).includes(\'?\') ? \'&\' : \'?\') + \'_ts=\' + Date.now();\n    const r = await fetch(u, {\n      method: \'GET\',\n      cache: \'no-store\',\n      headers: { \'Cache-Control\': \'no-cache\' },\n    });\n    if (!r.ok) throw new Error(\'http \' + r.status);\n    return await r.text();\n  }\n\n  function updateSyncBadge(kind){\n    const now = Date.now();\n    const ageSec = state.lastOkTs > 0 ? (now - state.lastOkTs) / 1000.0 : 0;\n    if (kind === \'error\') {\n      setHTML(\'client_sync_badge\', syncBadgeHTML(\'error\', ageSec));\n      return;\n    }\n    if (kind === \'warn\' || ageSec > 12) {\n      setHTML(\'client_sync_badge\', syncBadgeHTML(\'warn\', ageSec));\n      return;\n    }\n    setHTML(\'client_sync_badge\', syncBadgeHTML(\'ok\', ageSec));\n  }\n\n  async function refreshMain(){\n    if (state.mainInflight) return;\n    state.mainInflight = true;\n\n    try {\n      const payload = await fetchJSON(\'/panel/dashboard?upcoming_n=10\');\n      applyMainPayload(payload);\n      state.lastOkTs = Date.now();\n      updateSyncBadge(\'ok\');\n    } catch (err) {\n      console.warn(\'dashboard main refresh failed\', err);\n      updateSyncBadge(\'error\');\n    } finally {\n      state.mainInflight = false;\n    }\n  }\n\n  async function refreshLogs(){\n    if (state.logsInflight) return;\n    state.logsInflight = true;\n\n    try {\n      const [engineText, schedulerText] = await Promise.all([\n        fetchText(\'/logs?service=engine&tail=200\'),\n        fetchText(\'/logs?service=scheduler&tail=200\'),\n      ]);\n      applyLogs(engineText, schedulerText);\n    } catch (err) {\n      console.warn(\'dashboard logs refresh failed\', err);\n    } finally {\n      state.logsInflight = false;\n    }\n  }\n\n  function mainDelayMs(){\n    return document.hidden ? 10000 : 4000;\n  }\n\n  function logsDelayMs(){\n    return document.hidden ? 25000 : 12000;\n  }\n\n  async function mainLoop(){\n    if (!state.running) return;\n    await refreshMain();\n    clearTimeout(state.mainTimer);\n    state.mainTimer = window.setTimeout(mainLoop, mainDelayMs());\n  }\n\n  async function logsLoop(){\n    if (!state.running) return;\n    await refreshLogs();\n    clearTimeout(state.logsTimer);\n    state.logsTimer = window.setTimeout(logsLoop, logsDelayMs());\n  }\n\n  function startDashboard(){\n    if (state.running) return;\n    state.running = true;\n    clearTimeout(state.mainTimer);\n    clearTimeout(state.logsTimer);\n    state.mainTimer = null;\n    state.logsTimer = null;\n    void mainLoop();\n    void logsLoop();\n  }\n\n  function stopDashboard(){\n    state.running = false;\n    clearTimeout(state.mainTimer);\n    clearTimeout(state.logsTimer);\n    state.mainTimer = null;\n    state.logsTimer = null;\n    updateSyncBadge(\'warn\');\n  }\n\n  window.azDashboardStart = startDashboard;\n  window.azDashboardStop = stopDashboard;\n  window.azDashboardRefreshNow = async function(){\n    await refreshMain();\n    await refreshLogs();\n  };\n\n  document.addEventListener(\'visibilitychange\', () => {\n    if (!state.running) return;\n    if (!document.hidden) {\n      void refreshMain();\n      void refreshLogs();\n    }\n  });\n\n  window.addEventListener(\'focus\', () => {\n    if (!state.running) return;\n    void refreshMain();\n  });\n\n  window.setInterval(() => {\n    if (state.running) updateSyncBadge(\'ok\');\n  }, 1000);\n\n  if (document.readyState === \'loading\') {\n    document.addEventListener(\'DOMContentLoaded\', () => {\n      startDashboard();\n    }, { once: true });\n  } else {\n    startDashboard();\n  }\n})();\n'
+
+---
+# src/azursmartmix_control/ui_player_js.py
+
+imports:
+  - from __future__ import annotations
+
+module vars:
+  - AZURA_PLAYER_JS = '\n(function(){\n  function findPlayer(playerId){\n    const root = document.getElementById(playerId);\n    if (!root) return null;\n    const audio = root.querySelector(\'.az-stream-audio\');\n    const state = root.querySelector(\'[data-role="state"]\');\n    if (!audio || !state) return null;\n    return { root, audio, state };\n  }\n\n  function stampUrl(baseUrl){\n    try{\n      const u = new URL(baseUrl, window.location.href);\n      u.searchParams.set(\'_ts\', String(Date.now()));\n      return u.toString();\n    }catch(_e){\n      const sep = baseUrl.includes(\'?\') ? \'&\' : \'?\';\n      return `${baseUrl}${sep}_ts=${Date.now()}`;\n    }\n  }\n\n  function setState(stateEl, text){\n    if (stateEl) stateEl.textContent = text;\n  }\n\n  function bindOnce(ctx){\n    if (!ctx || ctx.audio.dataset.bound === \'1\') return;\n    ctx.audio.dataset.bound = \'1\';\n\n    ctx.audio.addEventListener(\'playing\', () => setState(ctx.state, \'playing\'));\n    ctx.audio.addEventListener(\'pause\', () => {\n      if (!ctx.audio.src) {\n        setState(ctx.state, \'idle\');\n        return;\n      }\n      setState(ctx.state, \'paused\');\n    });\n    ctx.audio.addEventListener(\'waiting\', () => setState(ctx.state, \'buffering\'));\n    ctx.audio.addEventListener(\'stalled\', () => setState(ctx.state, \'stalled\'));\n    ctx.audio.addEventListener(\'loadstart\', () => setState(ctx.state, \'connecting\'));\n    ctx.audio.addEventListener(\'emptied\', () => setState(ctx.state, \'idle\'));\n    ctx.audio.addEventListener(\'error\', () => setState(ctx.state, \'error\'));\n  }\n\n  window.azStreamPlay = async function(playerId){\n    const ctx = findPlayer(playerId);\n    if (!ctx) return;\n    bindOnce(ctx);\n\n    const baseUrl = ctx.root.getAttribute(\'data-stream-url\') || \'\';\n    if (!baseUrl) {\n      setState(ctx.state, \'missing-url\');\n      return;\n    }\n\n    const nextUrl = stampUrl(baseUrl);\n\n    try{\n      if (ctx.audio.src !== nextUrl) {\n        ctx.audio.src = nextUrl;\n      }\n      ctx.audio.load();\n      setState(ctx.state, \'connecting\');\n      await ctx.audio.play();\n    }catch(_e){\n      setState(ctx.state, \'blocked\');\n    }\n  };\n\n  window.azStreamStop = function(playerId){\n    const ctx = findPlayer(playerId);\n    if (!ctx) return;\n    bindOnce(ctx);\n\n    try{\n      ctx.audio.pause();\n      ctx.audio.removeAttribute(\'src\');\n      ctx.audio.load();\n    }catch(_e){}\n    setState(ctx.state, \'stopped\');\n  };\n\n  window.azStreamToggleMute = function(playerId){\n    const ctx = findPlayer(playerId);\n    if (!ctx) return;\n    bindOnce(ctx);\n\n    ctx.audio.muted = !ctx.audio.muted;\n    setState(ctx.state, ctx.audio.muted ? \'muted\' : (ctx.audio.paused ? \'paused\' : \'playing\'));\n  };\n\n  window.azStreamSetVolume = function(playerId, value){\n    const ctx = findPlayer(playerId);\n    if (!ctx) return;\n    bindOnce(ctx);\n\n    const n = Number(value);\n    if (!Number.isFinite(n)) return;\n    const vol = Math.max(0, Math.min(100, n)) / 100.0;\n    ctx.audio.volume = vol;\n    if (vol > 0 && ctx.audio.muted) {\n      ctx.audio.muted = false;\n    }\n  };\n})();\n'
+
+---
+# src/azursmartmix_control/ui_settings.py
+
+imports:
+  - from __future__ import annotations
+  - from nicegui import ui
+  - from pathlib import Path
+  - from typing import Any, Dict, List, Optional, Tuple
+  - import csv
+  - import html
+  - import os
+  - import re
+
+classes:
+  - class SettingsMixin
+      * method _load_env_reference_csv(self) -> None  # Load the env reference CSV (layout metadata only).
+      * method _card_settings(self) -> None
+      * method _on_settings_service_change(self, e) -> None
+      * method _on_settings_advanced_change(self, e) -> None
+      * method _on_settings_show_unmapped_change(self, e) -> None
+      * method _on_topcat_change(self, e) -> None
+      * method _get_ref(self, key: str) -> Dict[str, str]
+      * method _topcats_from_csv(self) -> List[str]
+      * method _keys_for_topcat_from_csv(self, topcat: str) -> List[str]
+      * method _build_topcat_tabs(self) -> None
+      * method _render_settings_grid(self) -> None
+      * method _render_setting_row(self, key: str, val: str) -> None
+      * async method refresh_settings(self) -> None
+      * async method save_settings(self) -> None
+
+
+---
+# src/azursmartmix_control/ui_theme_assets.py
+
+imports:
+  - from __future__ import annotations
+
+module vars:
+  - AZURA_CSS = '\n:root{\n  --az-blue: #1e88e5;\n  --az-blue-dark: #1565c0;\n  --az-bg: #1f242d;\n  --az-card: #262c37;\n  --az-card2: #2b3340;\n  --az-border: rgba(255,255,255,.08);\n  --az-text: rgba(255,255,255,.92);\n  --az-muted: rgba(255,255,255,.65);\n  --az-green: #22c55e;\n  --az-red: #ef4444;\n  --az-orange: #f59e0b;\n  --az-cyan: #22d3ee;\n  --az-violet: #a78bfa;\n  --az-shadow: 0 10px 30px rgba(0,0,0,.25);\n  --az-radius: 10px;\n  --az-font: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, sans-serif;\n  --az-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;\n  --grid-gap: 18px;\n}\n\n*, *::before, *::after { box-sizing: border-box; }\n\n/* +1 point globally */\nhtml { font-size: 17px !important; }\nbody { font-size: 17px !important; }\n\nhtml, body { background: var(--az-bg) !important; color: var(--az-text) !important; font-family: var(--az-font) !important; }\n.q-page-container, .q-layout, .q-page { background: var(--az-bg) !important; }\n.q-card, .q-table__container, .q-menu, .q-dialog__inner, .q-drawer { background: transparent !important; }\n\n.q-tab-panels,\n.q-tab-panel,\n.q-panel,\n.q-panel-parent,\n.q-tabs,\n.q-tabs__content,\n.q-tab-panels .q-panel,\n.q-tab-panels .q-panel-parent {\n  background: transparent !important;\n}\n\n.q-html,\n.q-html * {\n  background: transparent !important;\n}\n\n/* Force Quasar inputs to be dark */\n.q-field__native,\n.q-field__input,\n.q-field__prefix,\n.q-field__suffix,\n.q-field__label,\n.q-field__bottom,\n.q-field__messages,\n.q-placeholder,\n.q-field__native::placeholder,\n.q-field__input::placeholder {\n  color: rgba(255,255,255,.92) !important;\n}\n\n.q-field--outlined .q-field__control:before,\n.q-field--outlined .q-field__control:after {\n  border-color: rgba(255,255,255,.20) !important;\n}\n\n.q-field--outlined .q-field__control,\n.q-field__control {\n  background: rgba(0,0,0,.18) !important;\n}\n\n.q-field__marginal,\n.q-select__dropdown-icon,\n.q-icon {\n  color: rgba(255,255,255,.78) !important;\n}\n\n.q-menu,\n.q-list,\n.q-item,\n.q-item__label {\n  background: #151a22 !important;\n  color: rgba(255,255,255,.92) !important;\n}\n\n.az-topbar{\n  background: linear-gradient(0deg, var(--az-blue) 0%, var(--az-blue-dark) 100%) !important;\n  color: white !important;\n  border-bottom: 1px solid rgba(255,255,255,.15);\n  box-shadow: var(--az-shadow);\n}\n.az-topbar .az-brand { font-weight: 900; }\n.az-topbar .az-sub { opacity: .85; font-weight: 600; }\n\n/* center + 90% width */\n.az-wrap{\n  width: 90%;\n  max-width: 90%;\n  margin: 0 auto;\n  padding: 18px 18px 28px 18px;\n}\n\n.az-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: var(--grid-gap); }\n@media (max-width: 1200px){ .az-grid{ grid-template-columns: 1fr; } }\n\n.az-card{\n  background: var(--az-card) !important;\n  border: 1px solid var(--az-border);\n  border-radius: var(--az-radius);\n  box-shadow: var(--az-shadow);\n  overflow: hidden;\n  min-width: 520px;\n}\n@media (max-width: 1200px){ .az-card{ min-width: unset; } }\n\n.az-card-h{\n  background: var(--az-blue) !important;\n  color: white !important;\n  padding: 12px 14px;\n  font-weight: 900;\n  display:flex; align-items:center; justify-content:space-between;\n}\n.az-card-b{ padding: 14px; background: linear-gradient(180deg, var(--az-card2), var(--az-card)); }\n\n.az-badge{\n  display:inline-flex; align-items:center; gap:8px;\n  padding:6px 10px; border-radius:999px;\n  font-weight:900; font-size:13px;\n  border:1px solid var(--az-border);\n  background: rgba(255,255,255,.05);\n}\n.az-dot{ width:10px; height:10px; border-radius:999px; display:inline-block; }\n.az-dot.ok{ background: var(--az-green); }\n.az-dot.err{ background: var(--az-red); }\n.az-dot.warn{ background: var(--az-orange); }\n\n.az-opbtn .q-btn{\n  border-radius: 10px !important;\n  font-weight: 950 !important;\n  text-transform:none !important;\n  padding: 6px 10px !important;\n}\n.az-opbtn .q-btn--outline{ border:1px solid rgba(255,255,255,.55) !important; color:white !important; }\n\n.az-list{ display:flex; flex-direction:column; gap:8px; }\n.az-item{\n  padding: 10px 12px;\n  border-radius: 10px;\n  border: 1px solid var(--az-border);\n  background: rgba(255,255,255,.04);\n}\n.az-item .idx{\n  display:inline-block;\n  min-width:24px;\n  font-weight:950;\n  color: rgba(255,255,255,.75);\n}\n.az-item .txt{ font-weight:650; }\n\n.az-up-item{\n  display:flex;\n  flex-direction:column;\n  gap: 6px;\n}\n.az-up-head{\n  display:flex;\n  align-items:flex-start;\n  gap: 10px;\n}\n.az-up-idx{\n  min-width: 28px;\n  font-weight: 950;\n  color: rgba(255,255,255,.76);\n  line-height: 1.4;\n}\n.az-up-main{\n  flex: 1 1 auto;\n  min-width: 0;\n}\n.az-up-title{\n  font-weight: 850;\n  color: rgba(255,255,255,.96);\n  word-break: break-word;\n  line-height: 1.35;\n}\n.az-up-meta{\n  display:flex;\n  flex-wrap:wrap;\n  gap: 8px;\n  align-items:center;\n  margin-top: 2px;\n  font-family: var(--az-mono);\n  font-size: 13px;\n  color: rgba(255,255,255,.78);\n}\n.az-up-badge{\n  display:inline-flex;\n  align-items:center;\n  gap:6px;\n  padding:4px 8px;\n  border-radius:999px;\n  border:1px solid rgba(255,255,255,.10);\n  background: rgba(255,255,255,.05);\n  font-size:12px;\n  font-weight:900;\n  letter-spacing:.02em;\n}\n.az-up-badge.runtime{\n  color: rgba(34, 211, 238, .98);\n  border-color: rgba(34, 211, 238, .28);\n  background: rgba(34, 211, 238, .08);\n}\n.az-up-badge.tempo{\n  color: rgba(245, 158, 11, .98);\n  border-color: rgba(245, 158, 11, .30);\n  background: rgba(245, 158, 11, .08);\n}\n.az-up-chip{\n  display:inline-flex;\n  align-items:center;\n  gap:6px;\n  padding:4px 8px;\n  border-radius:999px;\n  border:1px solid rgba(255,255,255,.10);\n  background: rgba(255,255,255,.04);\n  font-size:12px;\n  font-weight:850;\n  line-height:1;\n}\n.az-up-chip.playlist{\n  color: rgba(34, 211, 238, .98);\n  border-color: rgba(34, 211, 238, .26);\n  background: rgba(34, 211, 238, .07);\n}\n.az-up-chip.bpm{\n  color: rgba(34, 197, 94, .98);\n  border-color: rgba(34, 197, 94, .24);\n  background: rgba(34, 197, 94, .08);\n}\n.az-up-chip.delta{\n  color: rgba(245, 158, 11, .98);\n  border-color: rgba(245, 158, 11, .26);\n  background: rgba(245, 158, 11, .08);\n}\n.az-up-chip.ts{\n  color: rgba(255,255,255,.72);\n  border-color: rgba(255,255,255,.10);\n  background: rgba(255,255,255,.04);\n}\n.az-up-sub{\n  margin-left: 38px;\n  font-family: var(--az-mono);\n  font-size: 12px;\n  color: rgba(255,255,255,.56);\n  word-break: break-word;\n}\n\n.rt-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }\n@media (max-width: 900px){ .rt-grid{ grid-template-columns: 1fr; } }\n\n.rt-box{\n  border: 1px solid var(--az-border);\n  border-radius: 10px;\n  background: rgba(0,0,0,.10);\n  overflow: hidden;\n  height: 100%;\n  display: flex;\n  flex-direction: column;\n}\n.rt-box-h{\n  padding: 10px 12px;\n  font-weight: 900;\n  border-bottom: 1px solid rgba(255,255,255,.08);\n  color: rgba(255,255,255,.92);\n}\n.rt-table{ width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }\n.rt-table tr td{\n  padding: 8px 12px;\n  border-bottom: 1px solid rgba(255,255,255,.06);\n  vertical-align: top;\n}\n.rt-table tr:last-child td{ border-bottom: none; }\n.rt-k{ width: 132px; color: var(--az-muted); white-space: nowrap; }\n.rt-v{ color: rgba(255,255,255,.92); font-family: var(--az-mono); word-break: break-word; width: 100%; }\n\n.az-grid-3{ display:grid; grid-template-columns: .80fr 1.20fr; gap: var(--grid-gap); align-items: stretch; }\n.az-grid-3 > .az-card{ height: 100%; }\n@media (max-width: 1200px){ .az-grid-3{ grid-template-columns: 1fr; } }\n\n.res-shell{ display:flex; flex-direction:column; gap:12px; }\n.res-top{ display:grid; grid-template-columns: 1fr auto; gap:10px; align-items:end; }\n.res-big{ font-size: 34px; font-weight: 950; line-height:1; }\n.res-big .unit{ font-size: 15px; opacity:.72; margin-left: 4px; font-weight:800; }\n.res-sub{ color: var(--az-muted); font-size: 13px; font-family: var(--az-mono); }\n.res-pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid var(--az-border); background: rgba(255,255,255,.04); font-size:12px; font-weight:900; }\n.res-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }\n@media (max-width: 700px){ .res-grid{ grid-template-columns: 1fr; } }\n.res-box{ border: 1px solid var(--az-border); border-radius: 12px; background: rgba(0,0,0,.12); padding: 12px; }\n.res-box-h{ display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; font-weight:900; }\n.res-box-h .mini{ color: var(--az-muted); font-size: 12px; font-weight:700; }\n.res-bar{ height: 10px; width:100%; border-radius: 999px; overflow:hidden; background: rgba(255,255,255,.08); }\n.res-bar > span{ display:block; height:100%; border-radius:999px; }\n.res-bar-cpu > span{ background: linear-gradient(90deg, #22d3ee, #1e88e5); }\n.res-bar-mem > span{ background: linear-gradient(90deg, #60a5fa, #a78bfa); }\n.res-kpis{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:8px; font-size: 13px; }\n.res-kpis .v{ font-family: var(--az-mono); font-weight: 900; color: rgba(255,255,255,.92); }\n\n.console-frame{\n  height: 420px;\n  overflow: auto;\n  border: 1px solid var(--az-border);\n  border-radius: 10px;\n  background: rgba(0,0,0,.55) !important;\n  padding: 10px 12px;\n}\n.console-frame, .console-frame * { background: transparent !important; }\n.console-frame { background: rgba(0,0,0,.55) !important; }\n.console-content{\n  font-family: var(--az-mono) !important;\n  font-size: 13px !important;\n  line-height: 1.35 !important;\n  color: rgba(255,255,255,.86) !important;\n  white-space: pre-wrap !important;\n  word-break: break-word !important;\n  margin: 0 !important;\n  padding: 0 !important;\n}\n\n.t-dim{ color: rgba(255,255,255,.45) !important; }\n.t-info{ color: rgba(56, 189, 248, .95) !important; }\n.t-warn{ color: rgba(245, 158, 11, .95) !important; }\n.t-err{  color: rgba(239, 68, 68, .95) !important; }\n.t-ok{   color: rgba(34, 197, 94, .95) !important; }\n.t-vio{  color: rgba(167, 139, 250, .95) !important; }\n.t-cyan{ color: rgba(34, 211, 238, .95) !important; }\n.t-bold{ font-weight: 900 !important; }\n\n.az-player{\n  width: 100%;\n  margin-top: 10px;\n  padding: 10px 10px;\n  border-radius: 12px;\n  border: 1px solid var(--az-border);\n  background: rgba(0,0,0,.22);\n}\n.az-player audio{\n  width: 100%;\n  height: 42px;\n  filter: invert(1) hue-rotate(180deg) saturate(1.2);\n  opacity: 0.95;\n}\n.az-player .hint{\n  margin-top: 8px;\n  font-size: 13px;\n  color: rgba(255,255,255,.65);\n  font-family: var(--az-mono);\n}\n\n.np-meta{\n  margin-top: 8px;\n  display:flex;\n  flex-direction:column;\n  gap: 6px;\n}\n.np-line{\n  font-family: var(--az-mono);\n  font-size: 13px;\n  color: rgba(255,255,255,.80);\n}\n.np-k{ color: rgba(255,255,255,.55); }\n.np-v{ color: rgba(255,255,255,.92); font-weight: 800; }\n.np-pill{\n  display:inline-flex; align-items:center; gap:8px;\n  padding: 5px 10px;\n  border-radius: 999px;\n  border:1px solid var(--az-border);\n  background: rgba(255,255,255,.05);\n}\n\n.az-tabsbar{\n  margin: 10px 0 18px 0;\n  border: 1px solid rgba(255,255,255,.10);\n  border-radius: 12px;\n  overflow: hidden;\n}\n.az-tabsbar .q-tabs{\n  background: rgba(0,0,0,.15) !important;\n}\n\n/* SETTINGS UI */\n.az-settings-toolbar{\n  display:flex;\n  flex-wrap: wrap;\n  gap: 10px;\n  align-items:center;\n  justify-content: space-between;\n  margin-bottom: 10px;\n}\n\n.az-settings-tools-left{\n  display:flex;\n  flex-wrap: wrap;\n  gap: 10px;\n  align-items:center;\n}\n\n.az-settings-tools-right{\n  display:flex;\n  flex-wrap: wrap;\n  gap: 10px;\n  align-items:center;\n}\n\n.az-settings-topcats{\n  margin: 10px 0 12px 0;\n  border: 1px solid rgba(255,255,255,.10);\n  border-radius: 12px;\n  overflow: hidden;\n}\n.az-settings-topcats .q-tabs{\n  background: rgba(0,0,0,.18) !important;\n}\n\n.az-settings-grid{\n  display:grid;\n  grid-template-columns: 1fr 1fr;\n  gap: 14px;\n}\n@media (max-width: 1200px){\n  .az-settings-grid{ grid-template-columns: 1fr; }\n}\n\n.set-box{\n  border: 1px solid var(--az-border);\n  border-radius: 12px;\n  background: rgba(0,0,0,.10);\n  overflow: hidden;\n}\n.set-box-h{\n  padding: 10px 12px;\n  font-weight: 950;\n  border-bottom: 1px solid rgba(255,255,255,.08);\n  display:flex;\n  align-items:center;\n  justify-content:space-between;\n}\n.set-box-h .meta{\n  font-family: var(--az-mono);\n  font-size: 12px;\n  opacity:.75;\n}\n.set-box-b{\n  padding: 6px 10px;\n}\n\n.set-row{\n  display:grid;\n  grid-template-columns: 520px 1fr;\n  gap: 10px;\n  padding: 10px 8px;\n  border-bottom: 1px solid rgba(255,255,255,.06);\n  align-items:flex-start;\n}\n.set-row:last-child{ border-bottom:none; }\n\n.set-left{\n  display:flex;\n  flex-direction:column;\n  gap: 4px;\n  min-width: 0;\n}\n\n.set-name{\n  font-size: 14px;\n  font-weight: 900;\n  color: rgba(255,255,255,.94);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.set-desc{\n  font-size: 12px;\n  color: var(--az-muted);\n  line-height: 1.25;\n  white-space: normal;\n  word-break: break-word;\n  opacity: .92;\n}\n\n.set-ctl{\n  justify-self: end;\n  width: 100%;\n}\n\n.az-inp .q-field__native,\n.az-inp .q-field__input,\n.az-inp input{\n  color: rgba(255,255,255,.92) !important;\n  font-family: var(--az-mono) !important;\n}\n\n/* SIMPLE LIVE PLAYER */\n.az-stream-player{\n  width: 100%;\n  margin-top: 10px;\n  padding: 12px;\n  border-radius: 12px;\n  border: 1px solid var(--az-border);\n  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.18));\n  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);\n}\n.az-stream-audio{\n  display: none;\n}\n.az-stream-top{\n  display:flex;\n  align-items:center;\n  justify-content:space-between;\n  gap: 12px;\n  margin-bottom: 10px;\n}\n.az-stream-live{\n  display:inline-flex;\n  align-items:center;\n  gap: 8px;\n  padding: 6px 10px;\n  border-radius: 999px;\n  background: rgba(239,68,68,.12);\n  border: 1px solid rgba(239,68,68,.28);\n  color: rgba(255,255,255,.96);\n  font-size: 12px;\n  font-weight: 900;\n  letter-spacing: .04em;\n}\n.az-live-dot{\n  width: 9px;\n  height: 9px;\n  border-radius: 999px;\n  background: var(--az-red);\n  box-shadow: 0 0 0 4px rgba(239,68,68,.18);\n}\n.az-stream-state{\n  font-family: var(--az-mono);\n  font-size: 12px;\n  color: rgba(255,255,255,.68);\n}\n.az-stream-controls{\n  display:flex;\n  flex-wrap: wrap;\n  align-items:center;\n  gap: 10px;\n}\n.az-stream-btn{\n  appearance: none;\n  border: 1px solid rgba(255,255,255,.16);\n  background: rgba(255,255,255,.05);\n  color: rgba(255,255,255,.94);\n  border-radius: 10px;\n  padding: 8px 14px;\n  font-weight: 900;\n  cursor: pointer;\n  transition: transform .12s ease, background .12s ease, border-color .12s ease;\n}\n.az-stream-btn:hover{\n  transform: translateY(-1px);\n  background: rgba(255,255,255,.08);\n  border-color: rgba(255,255,255,.24);\n}\n.az-stream-btn.primary{\n  background: linear-gradient(180deg, rgba(30,136,229,.96), rgba(21,101,192,.96));\n  border-color: rgba(30,136,229,.65);\n  color: #fff;\n}\n.az-stream-volume-wrap{\n  display:inline-flex;\n  align-items:center;\n  gap: 10px;\n  margin-left: auto;\n  padding: 8px 10px;\n  border-radius: 10px;\n  border: 1px solid rgba(255,255,255,.08);\n  background: rgba(0,0,0,.14);\n}\n.az-stream-vol-label{\n  font-family: var(--az-mono);\n  font-size: 12px;\n  color: rgba(255,255,255,.72);\n}\n.az-stream-volume{\n  width: 140px;\n  accent-color: var(--az-blue);\n}\n.az-stream-hint{\n  margin-top: 10px;\n  font-size: 13px;\n  color: rgba(255,255,255,.65);\n  font-family: var(--az-mono);\n  word-break: break-all;\n}\n'
+
+
+---
+# Estimation du nombre de tokens : 13027 tokens
