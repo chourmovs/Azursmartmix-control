@@ -84,10 +84,7 @@ def _build_image_ref(settings: Settings, tag: Optional[str]) -> str:
 
 
 class ComposeEnvSaveRequest(BaseModel):
-    # UI envoie un dict KEY->VALUE
     environment: Dict[str, str] = Field(default_factory=dict)
-
-    # legacy field (compose env could be dict/list). Kept for compatibility with existing UI payloads.
     env_format_prefer: str = Field(default="dict", description="dict|list (legacy, ignored for env_file)")
 
 
@@ -287,8 +284,6 @@ def create_api(settings: Settings) -> FastAPI:
 
         return docker_client.tail_logs(name=name, tail=tail_eff)
 
-    # ------------------- Compose control endpoints -------------------
-
     @app.post("/ops/compose/down", response_class=PlainTextResponse)
     def ops_compose_down() -> str:
         r = docker_client.compose_down(settings.azuramix_dir)
@@ -327,14 +322,9 @@ def create_api(settings: Settings) -> FastAPI:
         lines.append(f"overall_ok: {bool(r.get('ok'))}")
         return "\n".join(lines).strip() + "\n"
 
-    # ------------------- Settings editor (env_file on host) -------------------
-    # API contract remains the same: /compose/engine_env
-    # Implementation: read/write /var/azuramix/azuramix.env only.
-
     @app.get("/compose/engine_env")
     def compose_engine_env() -> Dict[str, Any]:
         data = get_env_from_host_envfile(settings.azuramix_env_file)
-        # keep UI stable: pretend this is "engine env"
         data["service"] = settings.compose_service_engine
         data["restart_required"] = False
         return data
@@ -350,8 +340,6 @@ def create_api(settings: Settings) -> FastAPI:
         r["message"] = "Saved to azuramix.env. Need to restart (docker compose up -d) to take effect."
         return r
 
-    # ------------------- Existing endpoints -------------------
-
     @app.get("/scheduler/upcoming")
     async def scheduler_upcoming(n: int = Query(10, ge=1, le=50)) -> JSONResponse:
         data = await sched.upcoming(n=n)
@@ -359,7 +347,6 @@ def create_api(settings: Settings) -> FastAPI:
 
     @app.get("/panel/engine_env")
     def panel_engine_env() -> Dict[str, Any]:
-        # legacy: read-only view from mounted compose file inside container
         return get_service_env(settings.compose_path, settings.compose_service_engine)
 
     @app.get("/panel/resources")
@@ -400,8 +387,6 @@ def create_api(settings: Settings) -> FastAPI:
             "engine": pack(eng),
             "scheduler": pack(sch),
         }
-
-    # --- (tout le reste de ton API existante inchangée) ---
 
     def _engine_titles_to_upcoming_entries(
         titles: List[str],
@@ -618,5 +603,42 @@ def create_api(settings: Settings) -> FastAPI:
                 "used_source": used_source,
             },
         }
+
+    @app.get("/panel/dashboard")
+    async def panel_dashboard(
+        upcoming_n: int = Query(10, ge=1, le=30),
+        include_logs: bool = Query(default=False),
+        engine_log_tail: int = Query(default=200, ge=1, le=2000),
+        scheduler_log_tail: int = Query(default=200, ge=1, le=2000),
+    ) -> Dict[str, Any]:
+        resources = panel_resources()
+        runtime = panel_runtime()
+        now = await panel_now()
+        upcoming = await panel_upcoming(n=upcoming_n)
+
+        payload: Dict[str, Any] = {
+            "ok": True,
+            "resources": resources,
+            "runtime": runtime,
+            "now": now,
+            "upcoming": upcoming,
+        }
+
+        if include_logs:
+            eng_tail = max(1, min(engine_log_tail, settings.log_tail_lines_max))
+            sch_tail = max(1, min(scheduler_log_tail, settings.log_tail_lines_max))
+
+            payload["logs"] = {
+                "engine": docker_client.tail_logs(
+                    name=settings.engine_container,
+                    tail=eng_tail,
+                ),
+                "scheduler": docker_client.tail_logs(
+                    name=settings.scheduler_container,
+                    tail=sch_tail,
+                ),
+            }
+
+        return payload
 
     return app
