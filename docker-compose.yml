@@ -28,6 +28,9 @@ services:
       # --- NEW: host project directory + target image for update ---
       AZURAMIX_DIR: "/var/azuramix"
       AZURSMARTMIX_IMAGE: "chourmovs/azursmartmix:beta1"
+          
+      env_file:
+      - /var/azuramix/azuramix.env
 
     ports:
       - "8088:8088"
