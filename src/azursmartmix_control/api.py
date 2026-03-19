@@ -1,6 +1,7 @@
 # src/azursmartmix_control/api.py
 from __future__ import annotations
 
+import math
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -152,27 +153,47 @@ def create_api(settings: Settings) -> FastAPI:
                     return val
         raise ValueError("Unexpected AzuraCast payload shape; expected list-like response")
 
+    def _as_int_or_none(value: Any) -> Optional[int]:
+        try:
+            if value is None or value == "":
+                return None
+            return int(value)
+        except Exception:
+            return None
+
+    def _as_float_or_none(value: Any) -> Optional[float]:
+        try:
+            if value is None or value == "":
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    def _as_bool_default(value: Any, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        s = str(value).strip().lower()
+        if s in {"1", "true", "yes", "on"}:
+            return True
+        if s in {"0", "false", "no", "off"}:
+            return False
+        return default
+
+    def _safe_str(value: Any) -> Optional[str]:
+        s = str(value or "").strip()
+        return s or None
+
     def _playlist_to_panel(item: Dict[str, Any]) -> Dict[str, Any]:
         links = item.get("links") if isinstance(item.get("links"), dict) else {}
         export = links.get("export") if isinstance(links.get("export"), dict) else {}
 
-        playlist_id = item.get("id")
-        try:
-            playlist_id = int(playlist_id) if playlist_id is not None else None
-        except Exception:
-            playlist_id = None
-
-        num_songs = item.get("num_songs")
-        try:
-            num_songs = int(num_songs) if num_songs is not None else None
-        except Exception:
-            num_songs = None
-
-        weight = item.get("weight")
-        try:
-            weight = int(weight) if weight is not None else None
-        except Exception:
-            weight = None
+        playlist_id = _as_int_or_none(item.get("id"))
+        num_songs = _as_int_or_none(item.get("num_songs"))
+        weight = _as_int_or_none(item.get("weight"))
 
         return {
             "id": playlist_id,
@@ -192,6 +213,131 @@ def create_api(settings: Settings) -> FastAPI:
             "export_m3u": str(export.get("m3u") or item.get("export_m3u") or item.get("exportM3U") or "").strip() or None,
             "export_pls": str(export.get("pls") or item.get("export_pls") or item.get("exportPLS") or "").strip() or None,
         }
+
+    def _normalize_playlist_refs(value: Any) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        if not isinstance(value, list):
+            return out
+
+        for it in value:
+            if isinstance(it, dict):
+                pid = _as_int_or_none(it.get("id"))
+                name = _safe_str(it.get("name") or it.get("text") or it.get("label"))
+                short_name = _safe_str(it.get("short_name") or it.get("shortName"))
+                out.append(
+                    {
+                        "id": pid,
+                        "name": name,
+                        "short_name": short_name,
+                    }
+                )
+            else:
+                name = _safe_str(it)
+                if name:
+                    out.append({"id": None, "name": name, "short_name": None})
+        return out
+
+    def _media_to_panel(item: Dict[str, Any]) -> Dict[str, Any]:
+        links = item.get("links") if isinstance(item.get("links"), dict) else {}
+
+        playlists = _normalize_playlist_refs(
+            item.get("playlists")
+            or item.get("playlist_refs")
+            or item.get("playlistRefs")
+        )
+
+        playlist_ids = [p["id"] for p in playlists if p.get("id") is not None]
+        playlist_names = [p["name"] for p in playlists if p.get("name")]
+
+        length = (
+            _as_float_or_none(item.get("length"))
+            or _as_float_or_none(item.get("duration"))
+            or _as_float_or_none(item.get("length_seconds"))
+            or _as_float_or_none(item.get("duration_seconds"))
+        )
+
+        media_id = (
+            _as_int_or_none(item.get("id"))
+            or _as_int_or_none(item.get("media_id"))
+            or _as_int_or_none(item.get("mediaId"))
+            or _as_int_or_none(item.get("song_id"))
+            or _as_int_or_none(item.get("songId"))
+        )
+
+        path = _safe_str(
+            item.get("path")
+            or item.get("file")
+            or item.get("file_path")
+            or item.get("relative_path")
+            or item.get("basename")
+        )
+
+        title = _safe_str(item.get("title"))
+        artist = _safe_str(item.get("artist"))
+        album = _safe_str(item.get("album"))
+
+        # Conservative fallback: if title missing, derive from path basename.
+        if not title and path:
+            title = DockerClient.display_title(os.path.basename(path))
+
+        return {
+            "id": media_id,
+            "path": path,
+            "title": title,
+            "title_display": title,
+            "artist": artist,
+            "album": album,
+            "length": length,
+            "length_text": _safe_str(item.get("length_text") or item.get("duration_text")),
+            "is_public": _as_bool_default(item.get("is_public"), default=False),
+            "playlists": playlists,
+            "playlist_ids": playlist_ids,
+            "playlist_names": playlist_names,
+            "links": links if links else None,
+            "raw_exists": item.get("exists"),
+        }
+
+    def _mount_to_panel(item: Dict[str, Any]) -> Dict[str, Any]:
+        mount_id = _as_int_or_none(item.get("id"))
+        bitrate = _as_int_or_none(item.get("bitrate"))
+        listeners = _as_int_or_none(item.get("listeners"))
+
+        return {
+            "id": mount_id,
+            "name": _safe_str(item.get("name")),
+            "display_name": _safe_str(item.get("display_name") or item.get("displayName")),
+            "path": _safe_str(item.get("path")),
+            "format": _safe_str(item.get("format")),
+            "bitrate": bitrate,
+            "listeners": listeners,
+            "is_default": _as_bool_default(item.get("is_default"), default=False),
+            "is_public": _as_bool_default(item.get("is_public"), default=False),
+            "intro_url": _safe_str(item.get("intro_url")),
+            "fallback_mount": _safe_str(item.get("fallback_mount")),
+            "relay_url": _safe_str(item.get("relay_url")),
+            "links": item.get("links") if isinstance(item.get("links"), dict) else None,
+        }
+
+    def _media_matches_query(item: Dict[str, Any], q: str) -> bool:
+        if not q:
+            return True
+        needle = q.casefold()
+        hay = " ".join(
+            [
+                str(item.get("path") or ""),
+                str(item.get("title") or ""),
+                str(item.get("artist") or ""),
+                str(item.get("album") or ""),
+                " ".join([str(x or "") for x in (item.get("playlist_names") or [])]),
+            ]
+        ).casefold()
+        return needle in hay
+
+    def _media_matches_playlist(item: Dict[str, Any], playlist_id: Optional[int]) -> bool:
+        if playlist_id is None:
+            return True
+        ids = item.get("playlist_ids") or []
+        return playlist_id in ids
 
     def _strict_icecast_title(ic_payload: Dict[str, Any]) -> Optional[str]:
         if not isinstance(ic_payload, dict) or not ic_payload.get("ok"):
@@ -381,6 +527,85 @@ def create_api(settings: Settings) -> FastAPI:
             payload = _az_get_json(f"/api/station/{station_id}/playlists")
             rows = _as_records_list(payload)
             items = [_playlist_to_panel(it) for it in rows if isinstance(it, dict)]
+            return {
+                "ok": True,
+                "source": "azuracast_api",
+                "station_id": station_id,
+                "total": len(items),
+                "items": items,
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "source": "azuracast_api",
+                "station_id": station_id,
+                "total": 0,
+                "items": [],
+                "error": str(e),
+            }
+
+    @app.get("/azuracast/media")
+    def azuracast_media(
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=50, ge=1, le=200),
+        q: str = Query(default=""),
+        playlist_id: Optional[int] = Query(default=None),
+    ) -> Dict[str, Any]:
+        station_id = int(settings.azuracast_station_id)
+
+        try:
+            payload = _az_get_json(f"/api/station/{station_id}/files")
+            rows = _as_records_list(payload)
+            all_items = [_media_to_panel(it) for it in rows if isinstance(it, dict)]
+
+            q_norm = str(q or "").strip()
+            filtered = [
+                it for it in all_items
+                if _media_matches_query(it, q_norm) and _media_matches_playlist(it, playlist_id)
+            ]
+
+            total = len(filtered)
+            total_pages = max(1, int(math.ceil(total / page_size))) if total > 0 else 1
+            page_eff = min(page, total_pages)
+            start = (page_eff - 1) * page_size
+            end = start + page_size
+            page_items = filtered[start:end]
+
+            return {
+                "ok": True,
+                "source": "azuracast_api",
+                "station_id": station_id,
+                "page": page_eff,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages,
+                "query": q_norm or None,
+                "playlist_id": playlist_id,
+                "items": page_items,
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "source": "azuracast_api",
+                "station_id": station_id,
+                "page": page,
+                "page_size": page_size,
+                "total": 0,
+                "total_pages": 0,
+                "query": str(q or "").strip() or None,
+                "playlist_id": playlist_id,
+                "items": [],
+                "error": str(e),
+            }
+
+    @app.get("/azuracast/mountpoints")
+    def azuracast_mountpoints() -> Dict[str, Any]:
+        station_id = int(settings.azuracast_station_id)
+
+        try:
+            payload = _az_get_json(f"/api/station/{station_id}/mounts")
+            rows = _as_records_list(payload)
+            items = [_mount_to_panel(it) for it in rows if isinstance(it, dict)]
             return {
                 "ok": True,
                 "source": "azuracast_api",
