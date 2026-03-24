@@ -201,25 +201,20 @@ class DashboardMixin:
             f'      <span class="az-live-dot"></span>'
             f'      <span>LIVE</span>'
             f'    </div>'
-            f'    <div class="az-stream-state" data-role="state">ready</div>'
+            f'    <div class="az-stream-state" data-role="state">idle</div>'
             f'  </div>'
-            f'  <div class="az-stream-main">'
-            f'    <button type="button" class="az-stream-btn" data-role="toggle" aria-label="Play/Pause">'
-            f'      <span data-role="glyph">▶</span>'
-            f'    </button>'
-            f'    <div class="az-stream-meta">'
-            f'      <div class="az-stream-label">Icecast stream</div>'
-            f'      <div class="az-stream-url" data-role="url" title="{u}">{u}</div>'
-            f'    </div>'
-            f'    <a class="az-stream-open" href="{u}" target="_blank" rel="noopener">open</a>'
-            f'  </div>'
-            f'  <div class="az-stream-foot">'
-            f'    <div class="az-stream-vol-wrap">'
-            f'      <span class="az-stream-vol-ico">🔊</span>'
-            f'      <input class="az-stream-vol" data-role="volume" type="range" min="0" max="1" step="0.01" value="1" />'
+            f'  <div class="az-stream-controls">'
+            f'    <button type="button" class="az-stream-btn primary" onclick="window.azStreamPlay(\'{player_id}\')">Play</button>'
+            f'    <button type="button" class="az-stream-btn" onclick="window.azStreamStop(\'{player_id}\')">Stop</button>'
+            f'    <button type="button" class="az-stream-btn" onclick="window.azStreamToggleMute(\'{player_id}\')">Mute</button>'
+            f'    <div class="az-stream-volume-wrap">'
+            f'      <span class="az-stream-vol-label">Vol</span>'
+            f'      <input class="az-stream-volume" type="range" min="0" max="100" value="100" '
+            f'        oninput="window.azStreamSetVolume(\'{player_id}\', this.value)" />'
             f'    </div>'
             f'  </div>'
-            f'</div>'
+            f'  <div class="az-stream-hint" data-copy="{u}">{u}</div>'
+            f"</div>"
         )
 
     def _card_upcoming(self) -> None:
@@ -235,8 +230,8 @@ class DashboardMixin:
     def _card_previous(self) -> None:
         with ui.element("div").classes("az-card").style("max-width: 100%;"):
             with ui.element("div").classes("az-card-h"):
-                ui.label("Playback History")
-                self._prev_source = ui.label("from persistent history").classes("text-xs").style(
+                ui.label("Previously Played")
+                self._prev_source = ui.label("from runtime history").classes("text-xs").style(
                     "opacity:.85;"
                 ).props("id=prev_source")
             with ui.element("div").classes("az-card-b"):
@@ -245,47 +240,38 @@ class DashboardMixin:
                 ).props("id=previous_played")
 
     def _previous_html(self, data: Dict[str, Any]) -> str:
-        items = data.get("history") if isinstance(data.get("history"), list) else []
-        if not items and isinstance(data.get("previous"), dict):
-            items = [data.get("previous")]
+        previous = data.get("previous") if isinstance(data.get("previous"), dict) else None
+        if not previous:
+            return '<div class="az-list"><div class="az-item"><span class="txt">No previously played track available.</span></div></div>'
 
-        if not items:
-            return '<div class="az-list"><div class="az-item"><span class="txt">No playback history available.</span></div></div>'
+        title = html.escape(str(previous.get("title_display") or previous.get("title") or "—"))
+        playlist = html.escape(str(previous.get("playlist") or "—"))
+        ts_iso = html.escape(str(previous.get("ts_iso_utc") or "—"))
+        source_path = html.escape(str(previous.get("source_path") or previous.get("path") or "—"))
+        bpm_raw = previous.get("bpm")
+        bpm = html.escape(f"{float(bpm_raw):.2f}") if isinstance(bpm_raw, (int, float)) else "—"
 
-        rows: List[str] = []
-        for i, item in enumerate(items, start=1):
-            if not isinstance(item, dict):
-                continue
+        meta = (
+            f'<span class="az-up-chip playlist"><span>PLAYLIST</span><span data-copy="{playlist}">{playlist}</span></span>'
+            f'<span class="az-up-chip bpm"><span>BPM</span><span data-copy="{bpm}">{bpm}</span></span>'
+            f'<span class="az-up-chip delta"><span>PLAYED AT</span><span data-copy="{ts_iso}">{ts_iso}</span></span>'
+        )
 
-            title = html.escape(str(item.get("title_display") or item.get("title") or "—"))
-            playlist = html.escape(str(item.get("playlist") or "—"))
-            ts_iso = html.escape(str(item.get("ts_iso_utc") or "—"))
-            source_path = html.escape(str(item.get("source_path") or item.get("path") or "—"))
-            bpm_raw = item.get("bpm")
-            bpm = html.escape(f"{float(bpm_raw):.2f}") if isinstance(bpm_raw, (int, float)) else "—"
-
-            meta = (
-                f'<span class="az-up-chip playlist"><span>PLAYLIST</span><span data-copy="{playlist}">{playlist}</span></span>'
-                f'<span class="az-up-chip bpm"><span>BPM</span><span data-copy="{bpm}">{bpm}</span></span>'
-                f'<span class="az-up-chip delta"><span>PLAYED AT</span><span data-copy="{ts_iso}">{ts_iso}</span></span>'
-            )
-
-            rows.append(
-                '<div class="az-item">'
-                '  <div class="az-up-item">'
-                '    <div class="az-up-head">'
-                f'      <div class="idx">{i}.</div>'
-                '      <div class="az-up-main">'
-                f'        <div class="az-up-title" data-copy="{title}">{title}</div>'
-                f'        <div class="az-up-meta">{meta}</div>'
-                f'        <div class="az-up-sub">source: <span data-copy="{source_path}">{source_path}</span></div>'
-                '      </div>'
-                '    </div>'
-                '  </div>'
-                '</div>'
-            )
-
-        return '<div class="az-list">' + ''.join(rows) + '</div>'
+        return (
+            '<div class="az-list">'
+            '  <div class="az-item">'
+            '    <div class="az-up-item">'
+            '      <div class="az-up-head">'
+            '        <div class="az-up-main">'
+            f'          <div class="az-up-title" data-copy="{title}">{title}</div>'
+            f'          <div class="az-up-meta">{meta}</div>'
+            f'          <div class="az-up-sub">source: <span data-copy="{source_path}">{source_path}</span></div>'
+            '        </div>'
+            '      </div>'
+            '    </div>'
+            '  </div>'
+            '</div>'
+        )
 
     def _card_logs(self) -> None:
         with ui.element("div").classes("az-card").style("grid-column: 1 / -1;"):
@@ -499,7 +485,7 @@ class DashboardMixin:
 
     async def refresh_previous(self) -> None:
         try:
-            prev = await self._get_json("/panel/history?n=100")
+            prev = await self._get_json("/panel/previous")
         except Exception:
             prev = {}
         self._apply_previous_payload(prev if isinstance(prev, dict) else {})
