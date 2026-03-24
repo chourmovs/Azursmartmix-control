@@ -227,6 +227,52 @@ class DashboardMixin:
             with ui.element("div").classes("az-card-b"):
                 self._up_list_container = ui.html('<div class="az-list"><div style="opacity:.7;">—</div></div>').props("id=upcoming_list")
 
+    def _card_previous(self) -> None:
+        with ui.element("div").classes("az-card").style("max-width: 100%;"):
+            with ui.element("div").classes("az-card-h"):
+                ui.label("Previously Played")
+                self._prev_source = ui.label("from runtime history").classes("text-xs").style(
+                    "opacity:.85;"
+                ).props("id=prev_source")
+            with ui.element("div").classes("az-card-b"):
+                self._prev_container = ui.html(
+                    '<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>'
+                ).props("id=previous_played")
+
+    def _previous_html(self, data: Dict[str, Any]) -> str:
+        previous = data.get("previous") if isinstance(data.get("previous"), dict) else None
+        if not previous:
+            return '<div class="az-list"><div class="az-item"><span class="txt">No previously played track available.</span></div></div>'
+
+        title = html.escape(str(previous.get("title_display") or previous.get("title") or "—"))
+        playlist = html.escape(str(previous.get("playlist") or "—"))
+        ts_iso = html.escape(str(previous.get("ts_iso_utc") or "—"))
+        source_path = html.escape(str(previous.get("source_path") or previous.get("path") or "—"))
+        bpm_raw = previous.get("bpm")
+        bpm = html.escape(f"{float(bpm_raw):.2f}") if isinstance(bpm_raw, (int, float)) else "—"
+
+        meta = (
+            f'<span class="az-up-chip playlist"><span>PLAYLIST</span><span data-copy="{playlist}">{playlist}</span></span>'
+            f'<span class="az-up-chip bpm"><span>BPM</span><span data-copy="{bpm}">{bpm}</span></span>'
+            f'<span class="az-up-chip delta"><span>PLAYED AT</span><span data-copy="{ts_iso}">{ts_iso}</span></span>'
+        )
+
+        return (
+            '<div class="az-list">'
+            '  <div class="az-item">'
+            '    <div class="az-up-item">'
+            '      <div class="az-up-head">'
+            '        <div class="az-up-main">'
+            f'          <div class="az-up-title" data-copy="{title}">{title}</div>'
+            f'          <div class="az-up-meta">{meta}</div>'
+            f'          <div class="az-up-sub">source: <span data-copy="{source_path}">{source_path}</span></div>'
+            '        </div>'
+            '      </div>'
+            '    </div>'
+            '  </div>'
+            '</div>'
+        )
+
     def _card_logs(self) -> None:
         with ui.element("div").classes("az-card").style("grid-column: 1 / -1;"):
             with ui.element("div").classes("az-card-h"):
@@ -352,6 +398,13 @@ class DashboardMixin:
 
         self._up_list_container.set_content('<div class="az-list">' + "".join(rows) + "</div>")
 
+    def _apply_previous_payload(self, prev: Dict[str, Any]) -> None:
+        if self._prev_source:
+            src = str(prev.get("source") or "runtime history")
+            self._prev_source.set_text(src)
+        if self._prev_container:
+            self._prev_container.set_content(self._previous_html(prev if isinstance(prev, dict) else {}))
+
     def _apply_logs_payload(self, engine_text: str, scheduler_text: str) -> None:
         if self._log_html_engine:
             self._log_html_engine.set_content(
@@ -429,6 +482,13 @@ class DashboardMixin:
         except Exception:
             up = {}
         self._apply_upcoming_payload(up if isinstance(up, dict) else {})
+
+    async def refresh_previous(self) -> None:
+        try:
+            prev = await self._get_json("/panel/previous")
+        except Exception:
+            prev = {}
+        self._apply_previous_payload(prev if isinstance(prev, dict) else {})
 
     async def refresh_logs(self) -> None:
         try:
