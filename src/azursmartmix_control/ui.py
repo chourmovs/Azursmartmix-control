@@ -82,6 +82,9 @@ class ControlUI(SettingsMixin, DashboardMixin):
         self._up_list_container = None
         self._up_source = None
 
+        self._prev_container = None
+        self._prev_source = None
+
         self._log_html_engine = None
         self._log_html_sched = None
 
@@ -102,6 +105,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
 
         self._tabs = None
         self._tab_dashboard = "Dashboard"
+        self._tab_history = "History"
         self._tab_library = "Library"
         self._tab_settings = "Settings"
 
@@ -292,7 +296,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
             if not isinstance(it, dict):
                 continue
 
-            mid = html.escape(str(it.get("id") if it.get("id") is not None else "—"))
+                mid = html.escape(str(it.get("id") if it.get("id") is not None else "—"))
             title = html.escape(str(it.get("title_display") or it.get("title") or "—"))
             artist = html.escape(str(it.get("artist") or "—"))
             album = html.escape(str(it.get("album") or "—"))
@@ -605,6 +609,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
                     "w-full"
                 ) as self._tabs:
                     ui.tab(self._tab_dashboard)
+                    ui.tab(self._tab_history)
                     ui.tab(self._tab_library)
                     ui.tab(self._tab_settings)
 
@@ -619,6 +624,10 @@ class ControlUI(SettingsMixin, DashboardMixin):
                     with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
                         self._card_logs()
 
+                with ui.tab_panel(self._tab_history):
+                    with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
+                        self._card_previous()
+
                 with ui.tab_panel(self._tab_library):
                     self._card_library()
 
@@ -626,6 +635,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
                     self._card_settings()
 
         ui.timer(0.1, self.refresh_dashboard, once=True)
+        ui.timer(0.12, self.refresh_previous, once=True)
         ui.timer(0.15, self.refresh_library, once=True)
         ui.timer(0.2, self.refresh_settings, once=True)
 
@@ -656,6 +666,11 @@ class ControlUI(SettingsMixin, DashboardMixin):
             await self.refresh_library()
             return
 
+        if value == self._tab_history:
+            self.disable_autorefresh()
+            await self.refresh_previous()
+            return
+
         self.enable_autorefresh()
         await self.refresh_dashboard()
 
@@ -666,6 +681,9 @@ class ControlUI(SettingsMixin, DashboardMixin):
             return
         if cur == self._tab_library:
             await self.refresh_library()
+            return
+        if cur == self._tab_history:
+            await self.refresh_previous()
             return
 
         try:
