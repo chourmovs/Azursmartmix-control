@@ -13,7 +13,7 @@ _lock = threading.Lock()
 
 
 def _empty_state() -> Dict[str, Any]:
-    return {"now": None, "queue": []}
+    return {"now": None, "queue": [], "history": []}
 
 
 def _normalize_state(data: Any) -> Dict[str, Any]:
@@ -22,6 +22,7 @@ def _normalize_state(data: Any) -> Dict[str, Any]:
 
     now = data.get("now")
     queue = data.get("queue")
+    history = data.get("history")
 
     if not isinstance(now, dict):
         now = None
@@ -29,9 +30,13 @@ def _normalize_state(data: Any) -> Dict[str, Any]:
     if not isinstance(queue, list):
         queue = []
 
+    if not isinstance(history, list):
+        history = []
+
     return {
         "now": now,
         "queue": queue,
+        "history": history,
     }
 
 
@@ -89,12 +94,12 @@ def get_state() -> Dict[str, Any]:
         local = _read_local_state()
 
         # Fast path: use local state if it already contains useful runtime data.
-        if local.get("now") is not None or local.get("queue"):
+        if local.get("now") is not None or local.get("queue") or local.get("history"):
             return local
 
         # Fallback to the engine container because /tmp is container-local.
         remote = _read_engine_container_state()
-        if remote.get("now") is not None or remote.get("queue"):
+        if remote.get("now") is not None or remote.get("queue") or remote.get("history"):
             return remote
 
         return local
