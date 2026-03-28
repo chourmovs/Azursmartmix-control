@@ -1,9 +1,9 @@
+# src/azursmartmix_control/api.py
 from __future__ import annotations
 
 import math
 import os
 import re
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -408,16 +408,14 @@ def create_api(settings: Settings) -> FastAPI:
         try:
             data = get_state()
         except Exception:
-            data = {"now": None, "queue": [], "history": []}
+            data = {"now": None, "queue": []}
         if not isinstance(data, dict):
-            return {"now": None, "queue": [], "history": []}
+            return {"now": None, "queue": []}
         now = data.get("now")
         queue = data.get("queue")
-        history = data.get("history")
         return {
             "now": now if isinstance(now, dict) else None,
             "queue": queue if isinstance(queue, list) else [],
-            "history": history if isinstance(history, list) else [],
         }
 
     def _runtime_entry_to_panel(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -455,10 +453,6 @@ def create_api(settings: Settings) -> FastAPI:
             "playlist": playlist_raw or None,
             "bpm": bpm,
             "ts": ts,
-            "ts_iso_utc": (
-                datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
-                if ts is not None else None
-            ),
             "path": path_raw or None,
             "source_path": source_path_raw or None,
         }
@@ -482,21 +476,6 @@ def create_api(settings: Settings) -> FastAPI:
                 continue
             if norm:
                 seen.add(norm)
-            out.append(ent)
-            if len(out) >= limit:
-                break
-
-        return out
-
-    def _runtime_history_panel(limit: int) -> List[Dict[str, Any]]:
-        st = _runtime_state()
-        raw = st.get("history") or []
-        out: List[Dict[str, Any]] = []
-
-        for item in reversed(raw):
-            ent = _runtime_entry_to_panel(item if isinstance(item, dict) else {})
-            if not ent:
-                continue
             out.append(ent)
             if len(out) >= limit:
                 break
@@ -989,17 +968,6 @@ def create_api(settings: Settings) -> FastAPI:
                 "tempo_items_count": len(tempo_items),
                 "used_source": used_source,
             },
-        }
-
-    @app.get("/panel/previous")
-    def panel_previous() -> Dict[str, Any]:
-        items = _runtime_history_panel(limit=1)
-        previous = items[0] if items else None
-
-        return {
-            "ok": previous is not None,
-            "source": "runtime_queue_state_history",
-            "previous": previous,
         }
 
     @app.get("/panel/dashboard")
