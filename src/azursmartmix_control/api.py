@@ -1,9 +1,11 @@
 # src/azursmartmix_control/api.py
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
+import subprocess
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -276,7 +278,6 @@ def create_api(settings: Settings) -> FastAPI:
         artist = _safe_str(item.get("artist"))
         album = _safe_str(item.get("album"))
 
-        # Conservative fallback: if title missing, derive from path basename.
         if not title and path:
             title = DockerClient.display_title(os.path.basename(path))
 
@@ -506,6 +507,208 @@ def create_api(settings: Settings) -> FastAPI:
                     return out
 
         return out
+
+    def _history_row_to_panel(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not isinstance(row, dict):
+            return None
+
+        title_raw = str(row.get("title") or "").strip()
+        playlist_raw = str(row.get("playlist") or "").strip()
+        played_at_iso = str(row.get("played_at_iso") or "").strip()
+        hour_local = str(row.get("hour_local") or "").strip()
+        source_path = str(row.get("source_path") or "").strip()
+        path = str(row.get("path") or "").strip()
+
+        title = _display_title_or_none(title_raw)
+        if not title and source_path:
+            title = _display_title_or_none(os.path.basename(source_path))
+        if not title and path:
+            title = _display_title_or_none(os.path.basename(path))
+        if not title:
+            return None
+
+        bpm = row.get("bpm")
+        try:
+            bpm = float(bpm) if bpm is not None else None
+        except Exception:
+            bpm = None
+
+        return {
+            "id": _as_int_or_none(row.get("id")),
+            "title": title,
+            "title_display": title,
+            "playlist": playlist_raw or None,
+            "played_at_iso": played_at_iso or None,
+            "hour_local": hour_local or None,
+            "bpm": bpm,
+            "path": path or None,
+            "source_path": source_path or None,
+        }
+
+    def _engine_history_page(page: int, page_size: int) -> Dict[str, Any]:
+        page_eff = max(1, int(page))
+        page_size_eff = max(1, min(int(page_size), 500))
+
+        script = r"""
+import json
+import math
+import os
+import sqlite3
+import sys
+
+page = max(1, int(sys.argv[1]))
+page_size = max(1, min(int(sys.argv[2]), 500))
+db_path = os.getenv("HISTORY_DB_PATH", "/data/engine_history/azurmix_history.db")
+
+out = {
+    "ok": False,
+    "db_path": db_path,
+    "page": page,
+    "page_size": page_size,
+    "total": 0,
+    "total_pages": 0,
+    "items": [],
+}
+
+if not os.path.exists(db_path):
+    out["error"] = f"history db not found: {db_path}"
+    print(json.dumps(out, ensure_ascii=False))
+    raise SystemExit(0)
+
+try:
+    con = sqlite3.connect(db_path, timeout=5.0)
+    con.row_factory = sqlite3.Row
+
+    total = int(con.execute("SELECT COUNT(*) FROM play_history").fetchone()[0] or 0)
+    total_pages = max(1, int(math.ceil(total / page_size))) if total > 0 else 1
+    page = min(page, total_pages)
+    offset = max(0, (page - 1) * page_size)
+
+    rows = con.execute(
+        '''
+        SELECT
+            id,
+            played_at,
+            played_at_iso,
+            hour_local,
+            title,
+            path,
+            playlist,
+            bpm,
+            source_path
+        FROM play_history
+        ORDER BY played_at DESC, id DESC
+        LIMIT ? OFFSET ?
+        ''',
+        (page_size, offset),
+    ).fetchall()
+
+    out.update(
+        {
+            "ok": True,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+            "items": [dict(r) for r in rows],
+        }
+    )
+except Exception as e:
+    out["error"] = str(e)
+finally:
+    try:
+        con.close()
+    except Exception:
+        pass
+
+print(json.dumps(out, ensure_ascii=False))
+""".strip()
+
+        try:
+            proc = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    settings.engine_container,
+                    "python3",
+                    "-c",
+                    script,
+                    str(page_eff),
+                    str(page_size_eff),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=8.0,
+            )
+        except Exception as e:
+            return {
+                "ok": False,
+                "source": "engine_history_sqlite",
+                "page": page_eff,
+                "page_size": page_size_eff,
+                "total": 0,
+                "total_pages": 0,
+                "items": [],
+                "error": str(e),
+            }
+
+        stdout = (proc.stdout or "").strip()
+        stderr = (proc.stderr or "").strip()
+
+        if proc.returncode != 0:
+            return {
+                "ok": False,
+                "source": "engine_history_sqlite",
+                "page": page_eff,
+                "page_size": page_size_eff,
+                "total": 0,
+                "total_pages": 0,
+                "items": [],
+                "error": stderr or stdout or f"docker exec rc={proc.returncode}",
+            }
+
+        if not stdout:
+            return {
+                "ok": False,
+                "source": "engine_history_sqlite",
+                "page": page_eff,
+                "page_size": page_size_eff,
+                "total": 0,
+                "total_pages": 0,
+                "items": [],
+                "error": "empty history payload",
+            }
+
+        try:
+            payload = json.loads(stdout)
+        except Exception as e:
+            return {
+                "ok": False,
+                "source": "engine_history_sqlite",
+                "page": page_eff,
+                "page_size": page_size_eff,
+                "total": 0,
+                "total_pages": 0,
+                "items": [],
+                "error": f"invalid history json: {e}",
+                "raw": stdout[:1000],
+            }
+
+        if not isinstance(payload, dict):
+            return {
+                "ok": False,
+                "source": "engine_history_sqlite",
+                "page": page_eff,
+                "page_size": page_size_eff,
+                "total": 0,
+                "total_pages": 0,
+                "items": [],
+                "error": "unexpected history payload shape",
+            }
+
+        payload["source"] = "engine_history_sqlite"
+        return payload
 
     @app.get("/runtime/queue")
     def runtime_queue():
@@ -968,6 +1171,55 @@ def create_api(settings: Settings) -> FastAPI:
                 "tempo_items_count": len(tempo_items),
                 "used_source": used_source,
             },
+        }
+
+    @app.get("/panel/history")
+    def panel_history(
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=25, ge=1, le=200),
+    ) -> Dict[str, Any]:
+        raw = _engine_history_page(page=page, page_size=page_size)
+
+        if not isinstance(raw, dict) or not raw.get("ok"):
+            return {
+                "ok": False,
+                "source": "engine_history_sqlite",
+                "page": int(page),
+                "page_size": int(page_size),
+                "total": 0,
+                "total_pages": 0,
+                "items": [],
+                "error": str((raw or {}).get("error") or "history unavailable"),
+            }
+
+        items_raw = raw.get("items") or []
+        items: List[Dict[str, Any]] = []
+        if isinstance(items_raw, list):
+            for row in items_raw:
+                item = _history_row_to_panel(row if isinstance(row, dict) else {})
+                if item is not None:
+                    items.append(item)
+
+        return {
+            "ok": True,
+            "source": raw.get("source") or "engine_history_sqlite",
+            "db_path": raw.get("db_path"),
+            "page": int(raw.get("page") or 1),
+            "page_size": int(raw.get("page_size") or page_size),
+            "total": int(raw.get("total") or 0),
+            "total_pages": int(raw.get("total_pages") or 1),
+            "items": items,
+        }
+
+    @app.get("/panel/previous")
+    def panel_previous() -> Dict[str, Any]:
+        hist = panel_history(page=1, page_size=1)
+        items = hist.get("items") if isinstance(hist, dict) else []
+        first = items[0] if isinstance(items, list) and items else None
+        return {
+            "ok": bool(first),
+            "source": hist.get("source") if isinstance(hist, dict) else "engine_history_sqlite",
+            "previous": first,
         }
 
     @app.get("/panel/dashboard")
