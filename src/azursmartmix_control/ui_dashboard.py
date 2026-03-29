@@ -228,46 +228,130 @@ class DashboardMixin:
                 self._up_list_container = ui.html('<div class="az-list"><div style="opacity:.7;">—</div></div>').props("id=upcoming_list")
 
     def _card_previous(self) -> None:
-        with ui.element("div").classes("az-card").style("max-width: 100%;"):
+        # Compat method name kept: the History tab already calls _card_previous().
+        if not hasattr(self, "_history_page"):
+            self._history_page = 1
+        if not hasattr(self, "_history_page_size"):
+            self._history_page_size = 25
+        if not hasattr(self, "_history_total"):
+            self._history_total = 0
+        if not hasattr(self, "_history_total_pages"):
+            self._history_total_pages = 1
+
+        with ui.element("div").classes("az-card").style("max-width: 100%; grid-column: 1 / -1;"):
             with ui.element("div").classes("az-card-h"):
-                ui.label("Previous")
-                self._prev_source = ui.label("runtime_queue_state").classes("text-xs").style(
+                ui.label("History")
+                self._prev_source = ui.label("engine_history_sqlite").classes("text-xs").style(
                     "opacity:.85;"
                 ).props("id=prev_source")
             with ui.element("div").classes("az-card-b"):
+                with ui.row().classes("items-center justify-between w-full").style("margin-bottom: 10px; gap: 10px;"):
+                    with ui.row().classes("items-center gap-2"):
+                        ui.label("Page size").classes("text-sm").style("opacity:.85;")
+                        self._history_page_size_select = ui.select(
+                            options=[10, 25, 50, 100, 200],
+                            value=int(self._history_page_size),
+                            on_change=self._on_history_page_size_change,
+                        ).props("dense outlined dark").style("min-width: 110px;")
+
+                    with ui.row().classes("items-center gap-2"):
+                        self._history_prev_btn = ui.button("Prev", on_click=self._history_prev_page).props("outline")
+                        self._history_next_btn = ui.button("Next", on_click=self._history_next_page).props("outline")
+                        ui.button("Refresh", on_click=self.refresh_previous).props("outline")
+                        self._history_page_label = ui.label("Page 1/1 • 0 rows").classes("text-xs").style("opacity:.85;")
+
                 self._prev_container = ui.html(
-                    '<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>'
+                    '<div class="az-list"><div class="az-item"><span class="txt">No history available.</span></div></div>'
                 ).props("id=previous_played")
+        self._sync_history_controls()
+
+    def _history_html(self, data: Dict[str, Any]) -> str:
+        items = data.get("items") if isinstance(data, dict) else None
+        if not isinstance(items, list) or not items:
+            err = str((data or {}).get("error") or "").strip() if isinstance(data, dict) else ""
+            msg = err or "No history available."
+            return f'<div class="az-list"><div class="az-item"><span class="txt">{html.escape(msg)}</span></div></div>'
+
+        rows: List[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            title = html.escape(str(item.get("title_display") or item.get("title") or "—"))
+            playlist = html.escape(str(item.get("playlist") or "—"))
+            played_at_iso = html.escape(str(item.get("played_at_iso") or "—"))
+            hour_local = html.escape(str(item.get("hour_local") or "—"))
+            path = html.escape(str(item.get("source_path") or item.get("path") or "—"))
+            bpm_raw = item.get("bpm")
+            bpm = html.escape(f"{float(bpm_raw):.2f}") if isinstance(bpm_raw, (int, float)) else "—"
+
+            rows.append(
+                '<div class="az-item">'
+                '  <div class="az-up-item">'
+                '    <div class="az-up-head">'
+                '      <div class="az-up-main">'
+                f'        <div class="az-up-title" data-copy="{title}">{title}</div>'
+                '        <div class="az-up-meta">'
+                f'          <span class="az-up-chip ts"><span>HOUR</span><span data-copy="{hour_local}">{hour_local}</span></span>'
+                f'          <span class="az-up-chip playlist"><span>PL</span><span data-copy="{playlist}">{playlist}</span></span>'
+                f'          <span class="az-up-chip bpm"><span>BPM</span><span data-copy="{bpm}">{bpm}</span></span>'
+                f'          <span class="az-up-chip ts"><span>TS</span><span data-copy="{played_at_iso}">{played_at_iso}</span></span>'
+                '        </div>'
+                f'        <div class="az-up-sub">source: <span data-copy="{path}">{path}</span></div>'
+                '      </div>'
+                '    </div>'
+                '  </div>'
+                '</div>'
+            )
+
+        return f'<div class="az-list">{"".join(rows)}</div>'
+
+    def _sync_history_controls(self) -> None:
+        page = int(getattr(self, "_history_page", 1) or 1)
+        total = int(getattr(self, "_history_total", 0) or 0)
+        total_pages = max(1, int(getattr(self, "_history_total_pages", 1) or 1))
+
+        if getattr(self, "_history_page_label", None):
+            self._history_page_label.set_text(f"Page {page}/{total_pages} • {total} rows")
+
+        if getattr(self, "_history_prev_btn", None):
+            if page > 1:
+                self._history_prev_btn.enable()
+            else:
+                self._history_prev_btn.disable()
+
+        if getattr(self, "_history_next_btn", None):
+            if page < total_pages:
+                self._history_next_btn.enable()
+            else:
+                self._history_next_btn.disable()
+
+    async def _on_history_page_size_change(self, e) -> None:
+        try:
+            self._history_page_size = int(e.value)
+        except Exception:
+            self._history_page_size = 25
+        self._history_page = 1
+        await self.refresh_previous()
+
+    async def _history_prev_page(self) -> None:
+        page = int(getattr(self, "_history_page", 1) or 1)
+        if page <= 1:
+            return
+        self._history_page = page - 1
+        await self.refresh_previous()
+
+    async def _history_next_page(self) -> None:
+        page = int(getattr(self, "_history_page", 1) or 1)
+        total_pages = max(1, int(getattr(self, "_history_total_pages", 1) or 1))
+        if page >= total_pages:
+            return
+        self._history_page = page + 1
+        await self.refresh_previous()
 
     def _previous_html(self, data: Dict[str, Any]) -> str:
-        prev = data.get("previous") if isinstance(data, dict) else None
-        if not isinstance(prev, dict):
-            return '<div class="az-list"><div class="az-item"><span class="txt">No previous track available.</span></div></div>'
-
-        title = html.escape(str(prev.get("title_display") or prev.get("title") or "—"))
-        playlist = html.escape(str(prev.get("playlist") or "—"))
-        ts = html.escape(str(prev.get("ts") or "—"))
-        bpm_raw = prev.get("bpm")
-        bpm = html.escape(f"{float(bpm_raw):.2f}") if isinstance(bpm_raw, (int, float)) else "—"
-
-        return (
-            '<div class="az-list">'
-            '  <div class="az-item">'
-            '    <div class="az-up-item">'
-            '      <div class="az-up-head">'
-            '        <div class="az-up-main">'
-            f'          <div class="az-up-title" data-copy="{title}">{title}</div>'
-            '          <div class="az-up-meta">'
-            f'            <span class="az-up-chip playlist"><span>PL</span><span data-copy="{playlist}">{playlist}</span></span>'
-            f'            <span class="az-up-chip bpm"><span>BPM</span><span data-copy="{bpm}">{bpm}</span></span>'
-            f'            <span class="az-up-chip ts"><span>TS</span><span data-copy="{ts}">{ts}</span></span>'
-            '          </div>'
-            '        </div>'
-            '      </div>'
-            '    </div>'
-            '  </div>'
-            '</div>'
-        )
+        # Compat wrapper kept: the old method name is still used by _apply_previous_payload().
+        return self._history_html(data)
 
     def _card_logs(self) -> None:
         with ui.element("div").classes("az-card").style("grid-column: 1 / -1;"):
@@ -396,10 +480,18 @@ class DashboardMixin:
 
     def _apply_previous_payload(self, prev: Dict[str, Any]) -> None:
         if self._prev_source:
-            src = str(prev.get("source") or "runtime history")
+            src = str(prev.get("source") or "engine_history_sqlite")
             self._prev_source.set_text(src)
+
+        self._history_page = int(prev.get("page") or getattr(self, "_history_page", 1) or 1)
+        self._history_page_size = int(prev.get("page_size") or getattr(self, "_history_page_size", 25) or 25)
+        self._history_total = int(prev.get("total") or 0)
+        self._history_total_pages = max(1, int(prev.get("total_pages") or 1))
+
         if self._prev_container:
             self._prev_container.set_content(self._previous_html(prev if isinstance(prev, dict) else {}))
+
+        self._sync_history_controls()
 
     def _apply_logs_payload(self, engine_text: str, scheduler_text: str) -> None:
         if self._log_html_engine:
@@ -480,10 +572,12 @@ class DashboardMixin:
         self._apply_upcoming_payload(up if isinstance(up, dict) else {})
 
     async def refresh_previous(self) -> None:
+        page = int(getattr(self, "_history_page", 1) or 1)
+        page_size = int(getattr(self, "_history_page_size", 25) or 25)
         try:
-            prev = await self._get_json("/panel/previous")
-        except Exception:
-            prev = {}
+            prev = await self._get_json(f"/panel/history?page={page}&page_size={page_size}")
+        except Exception as e:
+            prev = {"ok": False, "error": str(e), "page": page, "page_size": page_size, "total": 0, "total_pages": 1, "items": []}
         self._apply_previous_payload(prev if isinstance(prev, dict) else {})
 
     async def refresh_logs(self) -> None:
