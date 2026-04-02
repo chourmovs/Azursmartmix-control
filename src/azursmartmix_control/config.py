@@ -33,8 +33,12 @@ class Settings(BaseSettings):
     azuramix_dir: str = Field(default="/var/azuramix", alias="AZURAMIX_DIR")
     azuramix_compose_file: str = Field(default="/var/azuramix/docker-compose.yml", alias="AZURAMIX_COMPOSE_FILE")
 
-    # Host env file (the only file we edit for settings)
+    # Host env file (the only file we edit for env settings)
     azuramix_env_file: str = Field(default="/var/azuramix/azuramix.env", alias="AZURAMIX_ENV_FILE")
+
+    # Mounted project config directory / file (used by mountpoint manager)
+    azuramix_config_dir: str = Field(default="/azuramix/config", alias="AZURAMIX_CONFIG_DIR")
+    azuramix_config_file: str = Field(default="/azuramix/config/config.yml", alias="AZURAMIX_CONFIG_FILE")
 
     # Icecast now-playing
     icecast_scheme: str = Field(default="http", alias="ICECAST_SCHEME")
