@@ -1,6 +1,7 @@
 # src/azursmartmix_control/api.py
 from __future__ import annotations
 
+import datetime as dt
 import json
 import math
 import os
@@ -9,6 +10,7 @@ import subprocess
 from typing import Any, Dict, List, Optional
 
 import requests
+import yaml
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
@@ -91,6 +93,145 @@ def _build_image_ref(settings: Settings, tag: Optional[str]) -> str:
 class ComposeEnvSaveRequest(BaseModel):
     environment: Dict[str, str] = Field(default_factory=dict)
     env_format_prefer: str = Field(default="dict", description="dict|list (legacy, ignored for env_file)")
+
+
+class MountpointsSaveRequest(BaseModel):
+    outputs: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+def _backup_text_file(path: str) -> str:
+    ts = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    bak = f"{path}.bak-{ts}"
+    with open(path, "rb") as src, open(bak, "wb") as dst:
+        dst.write(src.read())
+    return bak
+
+
+def _read_config_yaml(config_file: str) -> Dict[str, Any]:
+    if not os.path.exists(config_file):
+        raise FileNotFoundError(f"config file not found: {config_file}")
+    with open(config_file, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"config root is not a mapping: {config_file}")
+    return data
+
+
+def _write_config_yaml_atomic(config_file: str, data: Dict[str, Any]) -> None:
+    parent = os.path.dirname(config_file) or "."
+    os.makedirs(parent, exist_ok=True)
+
+    st = None
+    try:
+        st = os.stat(config_file)
+    except Exception:
+        st = None
+
+    tmp = f"{config_file}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        yaml.safe_dump(
+            data,
+            f,
+            sort_keys=False,
+            default_flow_style=False,
+            allow_unicode=True,
+        )
+    os.replace(tmp, config_file)
+
+    if st is not None:
+        try:
+            os.chmod(config_file, st.st_mode)
+        except Exception:
+            pass
+
+
+def _normalize_mountpoint_output(item: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(item, dict):
+        return None
+
+    out = dict(item)
+
+    str_keys = (
+        "name",
+        "type",
+        "host",
+        "mount",
+        "username",
+        "password",
+        "stream_name",
+        "description",
+        "genre",
+        "format",
+    )
+    int_keys = ("port", "bitrate_kbps", "sample_rate", "channels", "protocol")
+    bool_keys = ("public", "cbr", "send_title_info")
+
+    for k in str_keys:
+        if k in out and out[k] is not None:
+            out[k] = str(out[k]).strip()
+
+    for k in int_keys:
+        if k in out and out[k] not in (None, ""):
+            try:
+                out[k] = int(out[k])
+            except Exception as e:
+                raise ValueError(f"invalid integer for {k}: {out[k]!r}") from e
+
+    for k in bool_keys:
+        if k in out:
+            v = out.get(k)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, (int, float)):
+                out[k] = bool(v)
+                continue
+            s = str(v or "").strip().lower()
+            if s in {"1", "true", "yes", "on"}:
+                out[k] = True
+            elif s in {"0", "false", "no", "off", ""}:
+                out[k] = False
+            else:
+                raise ValueError(f"invalid boolean for {k}: {v!r}")
+
+    name = str(out.get("name") or "").strip()
+    if not name:
+        raise ValueError("mountpoint field 'name' is required")
+
+    mount = str(out.get("mount") or "").strip()
+    if not mount:
+        raise ValueError("mountpoint field 'mount' is required")
+    if not mount.startswith("/"):
+        out["mount"] = "/" + mount
+
+    fmt = str(out.get("format") or "").strip()
+    if fmt:
+        out["format"] = fmt.lower()
+
+    mtype = str(out.get("type") or "").strip()
+    if not mtype:
+        out["type"] = "icecast"
+
+    return out
+
+
+def _get_mountpoints_payload(settings: Settings) -> Dict[str, Any]:
+    data = _read_config_yaml(settings.azuramix_config_file)
+    raw_outputs = data.get("outputs") or []
+    outputs: List[Dict[str, Any]] = []
+    if isinstance(raw_outputs, list):
+        for item in raw_outputs:
+            norm = _normalize_mountpoint_output(item)
+            if norm is not None:
+                outputs.append(norm)
+
+    return {
+        "ok": True,
+        "source": "config_yaml",
+        "config_dir": settings.azuramix_config_dir,
+        "config_file": settings.azuramix_config_file,
+        "count": len(outputs),
+        "outputs": outputs,
+    }
 
 
 def _display_title_or_none(value: Any) -> Optional[str]:
@@ -898,6 +1039,71 @@ print(json.dumps(out, ensure_ascii=False))
         r["restart_required"] = True
         r["message"] = "Saved to azuramix.env. Need to restart (docker compose up -d) to take effect."
         return r
+
+    @app.get("/config/mountpoints")
+    def config_mountpoints() -> Dict[str, Any]:
+        try:
+            return _get_mountpoints_payload(settings)
+        except Exception as e:
+            return {
+                "ok": False,
+                "source": "config_yaml",
+                "config_dir": settings.azuramix_config_dir,
+                "config_file": settings.azuramix_config_file,
+                "count": 0,
+                "outputs": [],
+                "error": str(e),
+            }
+
+    @app.post("/config/mountpoints")
+    def config_mountpoints_save(req: MountpointsSaveRequest) -> Dict[str, Any]:
+        try:
+            data = _read_config_yaml(settings.azuramix_config_file)
+
+            outputs_in = req.outputs if isinstance(req.outputs, list) else []
+            outputs: List[Dict[str, Any]] = []
+            seen_names: set[str] = set()
+            seen_mounts: set[str] = set()
+
+            for raw in outputs_in:
+                norm = _normalize_mountpoint_output(raw)
+                if norm is None:
+                    continue
+                name_key = str(norm.get("name") or "").strip().casefold()
+                mount_key = str(norm.get("mount") or "").strip().casefold()
+                if name_key in seen_names:
+                    raise ValueError(f"duplicate mountpoint name: {norm.get('name')!r}")
+                if mount_key in seen_mounts:
+                    raise ValueError(f"duplicate mount path: {norm.get('mount')!r}")
+                seen_names.add(name_key)
+                seen_mounts.add(mount_key)
+                outputs.append(norm)
+
+            backup = _backup_text_file(settings.azuramix_config_file)
+            data["outputs"] = outputs
+            _write_config_yaml_atomic(settings.azuramix_config_file, data)
+
+            return {
+                "ok": True,
+                "source": "config_yaml",
+                "config_dir": settings.azuramix_config_dir,
+                "config_file": settings.azuramix_config_file,
+                "count": len(outputs),
+                "outputs": outputs,
+                "backup": backup,
+                "restart_required": True,
+                "message": "Saved to config.yml. Restart/Recreate required.",
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "source": "config_yaml",
+                "config_dir": settings.azuramix_config_dir,
+                "config_file": settings.azuramix_config_file,
+                "count": 0,
+                "outputs": [],
+                "error": str(e),
+            }
 
     @app.get("/scheduler/upcoming")
     async def scheduler_upcoming(n: int = Query(10, ge=1, le=50)) -> JSONResponse:
