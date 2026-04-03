@@ -14,9 +14,10 @@ from azursmartmix_control.config import Settings
 from azursmartmix_control.ui_assets import AZURA_CSS, AZURA_JS
 from azursmartmix_control.ui_dashboard import DashboardMixin
 from azursmartmix_control.ui_settings import SettingsMixin
+from azursmartmix_control.ui_mountpoints import MountpointsMixin
 
 
-class ControlUI(SettingsMixin, DashboardMixin):
+class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
     """AzurSmartMix Control UI.
 
     Dashboard: Engine env frame removed (as requested).
@@ -107,6 +108,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
         self._tab_dashboard = "Dashboard"
         self._tab_history = "History"
         self._tab_library = "Library"
+        self._tab_mountpoints = "Mountpoints"
         self._tab_settings = "Settings"
 
         self._library_playlist_container = None
@@ -296,7 +298,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
             if not isinstance(it, dict):
                 continue
 
-                mid = html.escape(str(it.get("id") if it.get("id") is not None else "—"))
+            mid = html.escape(str(it.get("id") if it.get("id") is not None else "—"))
             title = html.escape(str(it.get("title_display") or it.get("title") or "—"))
             artist = html.escape(str(it.get("artist") or "—"))
             album = html.escape(str(it.get("album") or "—"))
@@ -611,6 +613,7 @@ class ControlUI(SettingsMixin, DashboardMixin):
                     ui.tab(self._tab_dashboard)
                     ui.tab(self._tab_history)
                     ui.tab(self._tab_library)
+                    ui.tab(self._tab_mountpoints)
                     ui.tab(self._tab_settings)
 
             with ui.tab_panels(self._tabs, value=self._tab_dashboard).classes("w-full"):
@@ -631,12 +634,16 @@ class ControlUI(SettingsMixin, DashboardMixin):
                 with ui.tab_panel(self._tab_library):
                     self._card_library()
 
+                with ui.tab_panel(self._tab_mountpoints):
+                    self._card_mountpoints()
+
                 with ui.tab_panel(self._tab_settings):
                     self._card_settings()
 
         ui.timer(0.1, self.refresh_dashboard, once=True)
         ui.timer(0.12, self.refresh_previous, once=True)
         ui.timer(0.15, self.refresh_library, once=True)
+        ui.timer(0.18, self.refresh_mountpoints, once=True)
         ui.timer(0.2, self.refresh_settings, once=True)
 
     def _current_main_tab(self) -> str:
@@ -666,6 +673,11 @@ class ControlUI(SettingsMixin, DashboardMixin):
             await self.refresh_library()
             return
 
+        if value == self._tab_mountpoints:
+            self.disable_autorefresh()
+            await self.refresh_mountpoints()
+            return
+
         if value == self._tab_history:
             self.disable_autorefresh()
             await self.refresh_previous()
@@ -681,6 +693,9 @@ class ControlUI(SettingsMixin, DashboardMixin):
             return
         if cur == self._tab_library:
             await self.refresh_library()
+            return
+        if cur == self._tab_mountpoints:
+            await self.refresh_mountpoints()
             return
         if cur == self._tab_history:
             await self.refresh_previous()
