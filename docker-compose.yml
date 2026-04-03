@@ -30,8 +30,8 @@ services:
       AZURSMARTMIX_IMAGE: "chourmovs/azursmartmix:beta1"
       AZURAMIX_CONFIG_DIR: "/azuramix/config"
       AZURAMIX_CONFIG_FILE: "/azuramix/config/config.yml"
-
-    env_file:
+          
+      env_file:
       - /var/azuramix/azuramix.env
 
     ports:
@@ -41,16 +41,16 @@ services:
       # IMPORTANT: RW required for start/stop/up/down/recreate via docker api/cli
       - /var/run/docker.sock:/var/run/docker.sock:rw
 
-      # runtime config (legacy read-only mount kept)
+      # runtime config
       - ./config/config.yml:/config/config.yml:ro
 
       # existing compose file mount (kept)
       - ../docker-compose.yml:/compose/docker-compose.yml:ro
 
-      # host project dir for docker compose commands (kept read-only)
+      # NEW: host project dir (ro is enough to run docker compose there)
       - /var/azuramix:/var/azuramix:ro
 
-      # project dir mounted at the path expected by the mountpoint manager
+      # RW project mount used by the mountpoints manager
       - /var/azuramix:/azuramix:rw
 
     networks:
