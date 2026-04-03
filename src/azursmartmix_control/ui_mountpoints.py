@@ -130,9 +130,8 @@ class MountpointsMixin:
                                         + ("color: var(--az-cyan);" if selected else "color: rgba(255,255,255,.96);")
                                     )
                                     with ui.row().classes("items-center gap-2"):
-                                        ui.html(
-                                            '<span class="az-up-badge runtime">SELECTED</span>' if selected else ""
-                                        )
+                                        if selected:
+                                            ui.html('<span class="az-up-badge runtime">SELECTED</span>')
                                 ui.html(
                                     '<div class="az-up-meta">'
                                     f'<span class="az-up-chip playlist"><span>MOUNT</span><span data-copy="{mount}">{mount}</span></span>'
@@ -188,11 +187,10 @@ class MountpointsMixin:
 
             if kind == "bool":
                 current = bool(value) if isinstance(value, bool) else self._parse_bool_like_key(key, value)
-                sw = ui.switch(
+                ui.switch(
                     value=bool(current),
                     on_change=lambda e, idx=idx, key=key: self._mountpoint_set_field(idx, key, bool(e.value)),
                 ).props("dense").classes("set-ctl")
-                _ = sw
                 return
 
             inp = ui.input(
@@ -300,6 +298,7 @@ class MountpointsMixin:
 
             self._mount_cfg_base = deepcopy(clean)
             self._mount_cfg_work = deepcopy(clean)
+
             if self._mount_cfg_work:
                 if self._mount_cfg_selected_idx is None or self._mount_cfg_selected_idx >= len(self._mount_cfg_work):
                     self._mount_cfg_selected_idx = 0
