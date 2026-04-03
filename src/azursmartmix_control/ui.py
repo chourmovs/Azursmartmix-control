@@ -13,8 +13,8 @@ from nicegui import ui
 from azursmartmix_control.config import Settings
 from azursmartmix_control.ui_assets import AZURA_CSS, AZURA_JS
 from azursmartmix_control.ui_dashboard import DashboardMixin
-from azursmartmix_control.ui_settings import SettingsMixin
 from azursmartmix_control.ui_mountpoints import MountpointsMixin
+from azursmartmix_control.ui_settings import SettingsMixin
 
 
 class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
@@ -151,6 +151,15 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
 
         self._compose_env_busy = False
         self._compose_env_format = "dict"
+
+        # Mountpoints state must be explicit after factorisation.
+        self._mount_cfg_base: List[Dict[str, Any]] = []
+        self._mount_cfg_work: List[Dict[str, Any]] = []
+        self._mount_cfg_selected_idx: Optional[int] = None
+        self._mount_cfg_busy = False
+        self._mount_cfg_list_container = None
+        self._mount_cfg_editor_container = None
+        self._mount_cfg_meta = None
 
         self._load_env_reference_csv()
 
