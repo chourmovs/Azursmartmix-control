@@ -110,6 +110,7 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
         self._tab_library = "Library"
         self._tab_mountpoints = "Mountpoints"
         self._tab_settings = "Settings"
+        self._tab_logs = "Logs"
 
         self._library_playlist_container = None
         self._library_mounts_html = None
@@ -599,6 +600,7 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
                     ui.tab(self._tab_library)
                     ui.tab(self._tab_mountpoints)
                     ui.tab(self._tab_settings)
+                    ui.tab(self._tab_logs)
 
             with ui.tab_panels(self._tabs, value=self._tab_dashboard).classes("w-full"):
                 with ui.tab_panel(self._tab_dashboard):
@@ -608,8 +610,6 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
                     with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
                         self._card_now()
                         self._card_upcoming()
-                    with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
-                        self._card_logs()
 
                 with ui.tab_panel(self._tab_history):
                     with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
@@ -624,11 +624,16 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
                 with ui.tab_panel(self._tab_settings):
                     self._card_settings()
 
+                with ui.tab_panel(self._tab_logs):
+                    with ui.element("div").classes("az-grid").style("margin-top: 16px;"):
+                        self._card_logs()
+
         ui.timer(0.1, self.refresh_dashboard, once=True)
         ui.timer(0.12, self.refresh_previous, once=True)
         ui.timer(0.15, self.refresh_library, once=True)
         ui.timer(0.18, self.refresh_mountpoints, once=True)
         ui.timer(0.2, self.refresh_settings, once=True)
+        ui.timer(0.22, self.refresh_logs, once=True)
 
     def _current_main_tab(self) -> str:
         try:
@@ -667,6 +672,11 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
             await self.refresh_previous()
             return
 
+        if value == self._tab_logs:
+            self.disable_autorefresh()
+            await self.refresh_logs()
+            return
+
         self.enable_autorefresh()
         await self.refresh_dashboard()
 
@@ -683,6 +693,9 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
             return
         if cur == self._tab_history:
             await self.refresh_previous()
+            return
+        if cur == self._tab_logs:
+            await self.refresh_logs()
             return
 
         try:
