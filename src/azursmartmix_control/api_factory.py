@@ -831,19 +831,6 @@ print(json.dumps(out, ensure_ascii=False))
                 "error": str(e),
             }
 
-    @app.get("/icecast/mounts")
-    async def icecast_mounts() -> Dict[str, Any]:
-        try:
-            return await ice.list_mounts()
-        except Exception as e:
-            return {
-                "ok": False,
-                "source": "icecast",
-                "count": 0,
-                "items": [],
-                "error": str(e),
-            }
-
     @app.get("/logs", response_class=PlainTextResponse)
     def logs(
         service: str = Query(..., description="engine|scheduler|<container_name>"),
@@ -1072,6 +1059,11 @@ print(json.dumps(out, ensure_ascii=False))
         ic = await ice.now_playing()
         icecast_title = _strict_icecast_title(ic)
 
+        ic_mounts = await ice.list_mountpoints()
+        mounts_items = ic_mounts.get("items") if isinstance(ic_mounts, dict) else None
+        if not isinstance(mounts_items, list):
+            mounts_items = []
+
         tempo_runtime = docker_client.extract_tempo_runtime_state(
             engine_container=settings.engine_container,
             tail=2500,
@@ -1120,7 +1112,7 @@ print(json.dumps(out, ensure_ascii=False))
         return {
             "ok": bool(title_effective),
             "mount": settings.icecast_mount,
-            "source": "runtime_queue_state+icecast(metadata_only)+engine_tempo(select_ok_after_current)+engine(STREAM_START)",
+            "source": "runtime_queue_state+icecast(metadata_only)+engine_tempo(select_ok_after_current)+engine(STREAM_START)+icecast(mount_list)",
             "now_source": now_source,
             "title_effective": title_effective,
             "playlist_effective": playlist_effective,
@@ -1133,9 +1125,13 @@ print(json.dumps(out, ensure_ascii=False))
             "engine_stream_start": ss,
             "tempo_runtime": tempo_runtime,
             "predicted_next": predicted_next,
+            "mounts": mounts_items,
             "debug": {
                 "icecast_ok": bool(isinstance(ic, dict) and ic.get("ok")),
                 "icecast_error": (ic.get("error") if isinstance(ic, dict) else None),
+                "icecast_mounts_ok": bool(isinstance(ic_mounts, dict) and ic_mounts.get("ok")),
+                "icecast_mounts_error": (ic_mounts.get("error") if isinstance(ic_mounts, dict) else None),
+                "icecast_mounts_count": len(mounts_items),
                 "runtime_now": runtime_now,
                 "runtime_upcoming_count": len(runtime_upcoming or []) if isinstance(runtime_upcoming, list) else 0,
                 "upcoming_primary_source": (
