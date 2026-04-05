@@ -190,3 +190,4 @@ AZURA_PLAYER_JS = r"""
     ctx.audio.volume = v;
   };
 })();
+"""
