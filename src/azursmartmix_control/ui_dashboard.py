@@ -1,3 +1,4 @@
+# src/azursmartmix_control/ui_dashboard.py
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -273,15 +274,26 @@ class DashboardMixin:
             return f'<div class="az-list"><div class="az-item"><span class="txt">{html.escape(msg)}</span></div></div>'
 
         rows: List[str] = []
+        last_title_norm = ""
+
         for item in items:
             if not isinstance(item, dict):
                 continue
 
-            title = html.escape(str(item.get("title_display") or item.get("title") or "—"))
+            title_raw = str(item.get("title_display") or item.get("title") or "").strip()
+            title_norm = title_raw.casefold().strip()
+            if not title_norm:
+                continue
+
+            # Mitigation front temporaire:
+            # ignore les doublons strictement consécutifs renvoyés par le backend.
+            if title_norm == last_title_norm:
+                continue
+            last_title_norm = title_norm
+
+            title = html.escape(title_raw)
             playlist = html.escape(str(item.get("playlist") or "—"))
-            played_at_iso = html.escape(str(item.get("played_at_iso") or "—"))
             hour_local = html.escape(str(item.get("hour_local") or "—"))
-            path = html.escape(str(item.get("source_path") or item.get("path") or "—"))
             bpm_raw = item.get("bpm")
             bpm = html.escape(f"{float(bpm_raw):.2f}") if isinstance(bpm_raw, (int, float)) else "—"
 
@@ -295,14 +307,15 @@ class DashboardMixin:
                 f'          <span class="az-up-chip ts"><span>HOUR</span><span data-copy="{hour_local}">{hour_local}</span></span>'
                 f'          <span class="az-up-chip playlist"><span>PL</span><span data-copy="{playlist}">{playlist}</span></span>'
                 f'          <span class="az-up-chip bpm"><span>BPM</span><span data-copy="{bpm}">{bpm}</span></span>'
-                f'          <span class="az-up-chip ts"><span>TS</span><span data-copy="{played_at_iso}">{played_at_iso}</span></span>'
                 '        </div>'
-                f'        <div class="az-up-sub">source: <span data-copy="{path}">{path}</span></div>'
                 '      </div>'
                 '    </div>'
                 '  </div>'
                 '</div>'
             )
+
+        if not rows:
+            return '<div class="az-list"><div class="az-item"><span class="txt">No history available.</span></div></div>'
 
         return f'<div class="az-list">{"".join(rows)}</div>'
 
