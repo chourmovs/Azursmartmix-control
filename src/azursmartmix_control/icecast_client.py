@@ -49,59 +49,157 @@ class IcecastClient:
         return [src] if isinstance(src, dict) else []
 
     @staticmethod
-    def _mount_from_source(source: Dict[str, Any]) -> Optional[str]:
-        mount = str(source.get("mount") or "").strip()
+    def _as_int_or_none(value: Any) -> Optional[int]:
+        try:
+            if value is None or value == "":
+                return None
+            return int(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _normalize_mount(value: Any) -> Optional[str]:
+        s = str(value or "").strip()
+        if not s:
+            return None
+        if s.startswith("/"):
+            return s
+        if "://" in s:
+            try:
+                from urllib.parse import urlparse
+
+                parsed = urlparse(s)
+                path = str(parsed.path or "").strip()
+                if path:
+                    return path if path.startswith("/") else f"/{path}"
+            except Exception:
+                pass
+        return f"/{s}"
+
+    def _source_mount(self, source: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(source, dict):
+            return None
+
+        mount = self._normalize_mount(source.get("mount"))
         if mount:
-            return mount if mount.startswith("/") else f"/{mount}"
+            return mount
 
         listenurl = str(source.get("listenurl") or "").strip()
         if listenurl:
-            try:
-                # Icecast direct mounts usually end with /mount.ext
-                if "://" in listenurl:
-                    path = listenurl.split("://", 1)[1]
-                    path = "/" + path.split("/", 1)[1] if "/" in path else ""
-                else:
-                    path = listenurl
-                path = path.strip()
-                return path or None
-            except Exception:
-                return None
+            return self._normalize_mount(listenurl)
 
         return None
 
+    def _source_public_url(self, source: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(source, dict):
+            return None
+
+        listenurl = str(source.get("listenurl") or "").strip()
+        if listenurl:
+            return listenurl
+
+        mount = self._source_mount(source)
+        if not mount:
+            return None
+
+        return f"{self._base()}{mount}"
+
     @staticmethod
-    def _item_from_source(source: Dict[str, Any]) -> Dict[str, Any]:
-        mount = IcecastClient._mount_from_source(source) or "unknown"
-        title = source.get("title") or source.get("yp_currently_playing") or None
-        artist = source.get("artist") or None
+    def _source_title(source: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(source, dict):
+            return None
+        title = str(source.get("title") or source.get("yp_currently_playing") or "").strip()
+        return title or None
 
-        listeners = source.get("listeners")
-        try:
-            listeners = int(listeners) if listeners not in (None, "") else 0
-        except Exception:
-            listeners = 0
+    @staticmethod
+    def _source_artist(source: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(source, dict):
+            return None
+        artist = str(source.get("artist") or "").strip()
+        return artist or None
 
-        bitrate = source.get("bitrate")
-        try:
-            bitrate = int(bitrate) if bitrate not in (None, "") else None
-        except Exception:
-            bitrate = None
+    @staticmethod
+    def _source_format_label(source: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(source, dict):
+            return None
+
+        raw = " ".join(
+            [
+                str(source.get("server_type") or ""),
+                str(source.get("content_type") or ""),
+                str(source.get("audio_info") or ""),
+            ]
+        ).strip().lower()
+
+        if not raw:
+            return None
+        if "aac" in raw:
+            return "AAC"
+        if "mpeg" in raw or "mp3" in raw:
+            return "MP3"
+        if "ogg" in raw or "vorbis" in raw:
+            return "Ogg"
+        if "opus" in raw:
+            return "Opus"
+        if "flac" in raw:
+            return "FLAC"
+        return None
+
+    def _source_to_mount_item(self, source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not isinstance(source, dict):
+            return None
+
+        mount = self._source_mount(source)
+        if not mount:
+            return None
+
+        bitrate = self._as_int_or_none(source.get("bitrate"))
+        listeners = self._as_int_or_none(source.get("listeners"))
+        listener_peak = self._as_int_or_none(source.get("listener_peak"))
+        title = self._source_title(source)
+        artist = self._source_artist(source)
+        public_url = self._source_public_url(source)
+        fmt = self._source_format_label(source)
+
+        if bitrate is not None and fmt:
+            display_name = f"{mount} ({bitrate}kbps {fmt})"
+        elif bitrate is not None:
+            display_name = f"{mount} ({bitrate}kbps)"
+        elif fmt:
+            display_name = f"{mount} ({fmt})"
+        else:
+            display_name = mount
 
         return {
             "mount": mount,
+            "display_name": display_name,
+            "public_url": public_url,
             "title": title,
             "artist": artist,
             "listeners": listeners,
-            "listener_peak": source.get("listener_peak"),
+            "listener_peak": listener_peak,
             "bitrate": bitrate,
-            "server_name": source.get("server_name"),
-            "genre": source.get("genre"),
-            "listenurl": source.get("listenurl"),
+            "server_name": str(source.get("server_name") or "").strip() or None,
+            "genre": str(source.get("genre") or "").strip() or None,
+            "content_type": str(source.get("server_type") or source.get("content_type") or "").strip() or None,
+            "format_label": fmt,
             "raw": source,
         }
 
-    async def list_mounts(self) -> Dict[str, Any]:
+    def _find_source_for_mount(self, sources: List[Any], mount: str) -> Optional[Dict[str, Any]]:
+        wanted = self._normalize_mount(mount)
+        if not wanted:
+            return None
+
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            if self._source_mount(source) == wanted:
+                return source
+
+        return None
+
+    async def list_mountpoints(self) -> Dict[str, Any]:
         try:
             payload = await self.fetch_status()
         except Exception as e:
@@ -110,13 +208,25 @@ class IcecastClient:
                 "source": "icecast",
                 "error": str(e),
                 "items": [],
+                "count": 0,
             }
 
         items: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+
         for source in self._iter_sources(payload):
-            if not isinstance(source, dict):
+            item = self._source_to_mount_item(source if isinstance(source, dict) else {})
+            if not item:
                 continue
-            items.append(self._item_from_source(source))
+
+            mount = str(item.get("mount") or "").strip()
+            if not mount or mount in seen:
+                continue
+
+            seen.add(mount)
+            items.append(item)
+
+        items.sort(key=lambda x: str(x.get("mount") or ""))
 
         return {
             "ok": True,
@@ -126,22 +236,18 @@ class IcecastClient:
         }
 
     async def now_playing(self) -> Dict[str, Any]:
-        mounts = await self.list_mounts()
-        if not mounts.get("ok"):
+        try:
+            payload = await self.fetch_status()
+        except Exception as e:
             return {
                 "ok": False,
                 "source": "icecast",
-                "error": mounts.get("error"),
+                "error": str(e),
                 "mount": self.mount,
             }
 
-        match = None
-        for item in mounts.get("items") or []:
-            if not isinstance(item, dict):
-                continue
-            if str(item.get("mount") or "") == self.mount:
-                match = item
-                break
+        sources = self._iter_sources(payload)
+        match = self._find_source_for_mount(sources, self.mount)
 
         if match is None:
             return {
@@ -150,22 +256,24 @@ class IcecastClient:
                 "error": "mount not found in status",
                 "mount": self.mount,
                 "available": [
-                    str(it.get("mount") or "unknown")
-                    for it in (mounts.get("items") or [])
-                    if isinstance(it, dict)
+                    (self._source_mount(s if isinstance(s, dict) else {}) or "unknown")
+                    for s in sources
                 ],
             }
+
+        title = self._source_title(match)
+        artist = self._source_artist(match)
 
         return {
             "ok": True,
             "source": "icecast",
             "mount": self.mount,
-            "title": match.get("title"),
-            "artist": match.get("artist"),
+            "title": title,
+            "artist": artist,
             "listeners": match.get("listeners"),
             "listener_peak": match.get("listener_peak"),
             "bitrate": match.get("bitrate"),
             "server_name": match.get("server_name"),
             "genre": match.get("genre"),
-            "raw": match.get("raw"),
+            "raw": match,
         }
