@@ -4,13 +4,16 @@ from __future__ import annotations
 
 AZURA_PLAYER_JS = r"""
 (function(){
+  let activePlayerId = null;
+
   function findPlayer(playerId){
     const root = document.getElementById(playerId);
     if (!root) return null;
     const audio = root.querySelector('.az-stream-audio');
     const state = root.querySelector('[data-role="state"]');
+    const toggle = root.querySelector('[data-role="toggle"]');
     if (!audio || !state) return null;
-    return { root, audio, state };
+    return { root, audio, state, toggle };
   }
 
   function stampUrl(baseUrl){
@@ -28,26 +31,63 @@ AZURA_PLAYER_JS = r"""
     if (stateEl) stateEl.textContent = text;
   }
 
+  function setToggleVisual(toggleEl, isPlaying){
+    if (!toggleEl) return;
+    toggleEl.dataset.state = isPlaying ? 'playing' : 'paused';
+    toggleEl.textContent = isPlaying ? '❚❚' : '▶';
+  }
+
   function bindOnce(ctx){
     if (!ctx || ctx.audio.dataset.bound === '1') return;
     ctx.audio.dataset.bound = '1';
 
-    ctx.audio.addEventListener('playing', () => setState(ctx.state, 'playing'));
+    ctx.audio.addEventListener('playing', () => {
+      setState(ctx.state, 'playing');
+      setToggleVisual(ctx.toggle, true);
+    });
+
     ctx.audio.addEventListener('pause', () => {
       if (!ctx.audio.src) {
         setState(ctx.state, 'idle');
+        setToggleVisual(ctx.toggle, false);
         return;
       }
       setState(ctx.state, 'paused');
+      setToggleVisual(ctx.toggle, false);
     });
+
     ctx.audio.addEventListener('waiting', () => setState(ctx.state, 'buffering'));
     ctx.audio.addEventListener('stalled', () => setState(ctx.state, 'stalled'));
     ctx.audio.addEventListener('loadstart', () => setState(ctx.state, 'connecting'));
-    ctx.audio.addEventListener('emptied', () => setState(ctx.state, 'idle'));
-    ctx.audio.addEventListener('error', () => setState(ctx.state, 'error'));
+    ctx.audio.addEventListener('emptied', () => {
+      setState(ctx.state, 'idle');
+      setToggleVisual(ctx.toggle, false);
+    });
+    ctx.audio.addEventListener('error', () => {
+      setState(ctx.state, 'error');
+      setToggleVisual(ctx.toggle, false);
+    });
   }
 
-  window.azStreamPlay = async function(playerId){
+  function stopOtherPlayers(exceptPlayerId){
+    const players = document.querySelectorAll('[id^="az_mount_"], .az-stream-player');
+    players.forEach((node) => {
+      const pid = node.id;
+      if (!pid || pid === exceptPlayerId) return;
+      const ctx = findPlayer(pid);
+      if (!ctx) return;
+      bindOnce(ctx);
+      try{
+        ctx.audio.pause();
+        ctx.audio.removeAttribute('src');
+        ctx.audio.load();
+        setState(ctx.state, 'idle');
+        setToggleVisual(ctx.toggle, false);
+      }catch(_e){}
+    });
+  }
+
+  async function playPlayer(playerId){
     const ctx = findPlayer(playerId);
     if (!ctx) return;
     bindOnce(ctx);
@@ -55,8 +95,11 @@ AZURA_PLAYER_JS = r"""
     const baseUrl = ctx.root.getAttribute('data-stream-url') || '';
     if (!baseUrl) {
       setState(ctx.state, 'missing-url');
+      setToggleVisual(ctx.toggle, false);
       return;
     }
+
+    stopOtherPlayers(playerId);
 
     const nextUrl = stampUrl(baseUrl);
 
@@ -67,40 +110,71 @@ AZURA_PLAYER_JS = r"""
       ctx.audio.load();
       setState(ctx.state, 'connecting');
       await ctx.audio.play();
+      activePlayerId = playerId;
+      setToggleVisual(ctx.toggle, true);
     }catch(_e){
       setState(ctx.state, 'blocked');
+      setToggleVisual(ctx.toggle, false);
     }
+  }
+
+  function pausePlayer(playerId){
+    const ctx = findPlayer(playerId);
+    if (!ctx) return;
+    bindOnce(ctx);
+    try{
+      ctx.audio.pause();
+      setState(ctx.state, 'paused');
+      setToggleVisual(ctx.toggle, false);
+      if (activePlayerId === playerId) activePlayerId = null;
+    }catch(_e){
+      setState(ctx.state, 'error');
+      setToggleVisual(ctx.toggle, false);
+    }
+  }
+
+  window.azStreamPlay = async function(playerId){
+    await playPlayer(playerId);
   };
 
   window.azStreamPause = function(playerId){
+    pausePlayer(playerId);
+  };
+
+  window.azStreamTogglePlayPause = async function(playerId, buttonEl){
     const ctx = findPlayer(playerId);
     if (!ctx) return;
     bindOnce(ctx);
 
-    try{
-      ctx.audio.pause();
-    }catch(_e){}
-    setState(ctx.state, 'paused');
+    const isPlaying = !ctx.audio.paused && !ctx.audio.ended && !!ctx.audio.src;
+    if (isPlaying) {
+      pausePlayer(playerId);
+      return;
+    }
+    await playPlayer(playerId);
   };
 
   window.azStreamStop = function(playerId){
     const ctx = findPlayer(playerId);
     if (!ctx) return;
     bindOnce(ctx);
-
     try{
       ctx.audio.pause();
       ctx.audio.removeAttribute('src');
       ctx.audio.load();
-    }catch(_e){}
-    setState(ctx.state, 'stopped');
+      setState(ctx.state, 'idle');
+      setToggleVisual(ctx.toggle, false);
+      if (activePlayerId === playerId) activePlayerId = null;
+    }catch(_e){
+      setState(ctx.state, 'error');
+      setToggleVisual(ctx.toggle, false);
+    }
   };
 
   window.azStreamToggleMute = function(playerId){
     const ctx = findPlayer(playerId);
     if (!ctx) return;
     bindOnce(ctx);
-
     ctx.audio.muted = !ctx.audio.muted;
     setState(ctx.state, ctx.audio.muted ? 'muted' : (ctx.audio.paused ? 'paused' : 'playing'));
   };
@@ -112,8 +186,7 @@ AZURA_PLAYER_JS = r"""
 
     const n = Number(value);
     if (!Number.isFinite(n)) return;
-    const vol = Math.max(0, Math.min(100, n)) / 100.0;
-    ctx.audio.volume = vol;
+    const v = Math.max(0, Math.min(100, n)) / 100.0;
+    ctx.audio.volume = v;
   };
 })();
-"""
