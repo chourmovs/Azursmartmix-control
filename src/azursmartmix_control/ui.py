@@ -307,31 +307,25 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
             if not isinstance(it, dict):
                 continue
 
-            mid = html.escape(str(it.get("id") if it.get("id") is not None else "—"))
-            title = html.escape(str(it.get("title_display") or it.get("title") or "—"))
-            artist = html.escape(str(it.get("artist") or "—"))
-            album = html.escape(str(it.get("album") or "—"))
-            path = html.escape(str(it.get("path") or "—"))
-            length_text = html.escape(str(it.get("length_text") or "—"))
+            title_raw = str(it.get("title_display") or it.get("title") or "").strip()
+            artist_raw = str(it.get("artist") or "").strip()
+            album_raw = str(it.get("album") or "").strip()
+            length_raw = str(it.get("length_text") or "").strip()
 
-            playlist_names = it.get("playlist_names") or []
-            if isinstance(playlist_names, list):
-                playlist_names_txt = html.escape(", ".join(str(x) for x in playlist_names if x))
+            if artist_raw and title_raw:
+                display_title_raw = f"{artist_raw} - {title_raw}"
             else:
-                playlist_names_txt = "—"
+                display_title_raw = artist_raw or title_raw or "—"
+
+            display_title = html.escape(display_title_raw)
+            artist = html.escape(artist_raw or "—")
+            album = html.escape(album_raw or "—")
+            length_text = html.escape(length_raw or "—")
 
             meta = (
-                f'<span class="az-up-chip playlist"><span>ID</span><span data-copy="{mid}">{mid}</span></span>'
                 f'<span class="az-up-chip bpm"><span>DUR</span><span data-copy="{length_text}">{length_text}</span></span>'
                 f'<span class="az-up-chip"><span>ARTIST</span><span data-copy="{artist}">{artist}</span></span>'
                 f'<span class="az-up-chip"><span>ALBUM</span><span data-copy="{album}">{album}</span></span>'
-            )
-
-            sub = (
-                f'<div class="az-up-sub">'
-                f'path: <span data-copy="{path}">{path}</span>'
-                f' <span class="t-dim">|</span> playlists: <span data-copy="{playlist_names_txt}">{playlist_names_txt}</span>'
-                f'</div>'
             )
 
             rows.append(
@@ -339,9 +333,8 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
                 '  <div class="az-up-item">'
                 '    <div class="az-up-head">'
                 '      <div class="az-up-main">'
-                f'        <div class="az-up-title" data-copy="{title}">{title}</div>'
+                f'        <div class="az-up-title" data-copy="{display_title}">{display_title}</div>'
                 f'        <div class="az-up-meta">{meta}</div>'
-                f'        {sub}'
                 '      </div>'
                 '    </div>'
                 '  </div>'
@@ -447,24 +440,16 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
 
             with ui.element("div").classes("az-card"):
                 with ui.element("div").classes("az-card-h"):
-                    ui.label("AzuraCast Mountpoints")
-                    ui.button("Refresh", on_click=self.refresh_library).props("outline")
+                    self._library_media_title = ui.label("Playlist Files")
+                    with ui.row().classes("items-center gap-2"):
+                        self._library_media_prev_btn = ui.button("Prev", on_click=self._library_prev_page).props("outline")
+                        self._library_media_next_btn = ui.button("Next", on_click=self._library_next_page).props("outline")
+                        self._library_media_page_label = ui.label("Page 1/1 • 0 files").classes("text-xs").style("opacity:.85;")
                 with ui.element("div").classes("az-card-b"):
-                    self._library_mounts_html = ui.html(
-                        '<div class="az-list"><div class="az-item"><span class="txt">—</span></div></div>'
+                    self._library_media_html = ui.html(
+                        '<div class="az-list"><div class="az-item"><span class="txt">Select a playlist to browse its files.</span></div></div>'
                     )
 
-        with ui.element("div").classes("az-card").style("margin-top: 16px;"):
-            with ui.element("div").classes("az-card-h"):
-                self._library_media_title = ui.label("Playlist Files")
-                with ui.row().classes("items-center gap-2"):
-                    self._library_media_prev_btn = ui.button("Prev", on_click=self._library_prev_page).props("outline")
-                    self._library_media_next_btn = ui.button("Next", on_click=self._library_next_page).props("outline")
-                    self._library_media_page_label = ui.label("Page 1/1 • 0 files").classes("text-xs").style("opacity:.85;")
-            with ui.element("div").classes("az-card-b"):
-                self._library_media_html = ui.html(
-                    '<div class="az-list"><div class="az-item"><span class="txt">Select a playlist to browse its files.</span></div></div>'
-                )
         self._sync_library_media_controls()
 
     async def _select_library_playlist(self, playlist_id: Optional[int], playlist_name: str) -> None:
@@ -538,11 +523,6 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
         except Exception as e:
             playlists = {"ok": False, "error": str(e)}
 
-        try:
-            mounts = await self._get_json("/azuracast/mountpoints")
-        except Exception as e:
-            mounts = {"ok": False, "error": str(e)}
-
         if isinstance(playlists, dict) and playlists.get("ok") and isinstance(playlists.get("items"), list):
             self._library_playlists_rows = [it for it in playlists.get("items") or [] if isinstance(it, dict)]
         else:
@@ -556,11 +536,6 @@ class ControlUI(MountpointsMixin, SettingsMixin, DashboardMixin):
                 self._library_media_page = 1
 
         self._render_library_playlists()
-
-        if self._library_mounts_html:
-            self._library_mounts_html.set_content(
-                self._library_mountpoints_html(mounts if isinstance(mounts, dict) else {})
-            )
 
         await self.refresh_library_media()
         self._library_busy = False
