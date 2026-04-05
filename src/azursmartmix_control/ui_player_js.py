@@ -1,3 +1,4 @@
+# src/azursmartmix_control/ui_player_js.py
 from __future__ import annotations
 
 
@@ -71,6 +72,17 @@ AZURA_PLAYER_JS = r"""
     }
   };
 
+  window.azStreamPause = function(playerId){
+    const ctx = findPlayer(playerId);
+    if (!ctx) return;
+    bindOnce(ctx);
+
+    try{
+      ctx.audio.pause();
+    }catch(_e){}
+    setState(ctx.state, 'paused');
+  };
+
   window.azStreamStop = function(playerId){
     const ctx = findPlayer(playerId);
     if (!ctx) return;
@@ -102,9 +114,6 @@ AZURA_PLAYER_JS = r"""
     if (!Number.isFinite(n)) return;
     const vol = Math.max(0, Math.min(100, n)) / 100.0;
     ctx.audio.volume = vol;
-    if (vol > 0 && ctx.audio.muted) {
-      ctx.audio.muted = false;
-    }
   };
 })();
 """
