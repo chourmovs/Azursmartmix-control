@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 import html
 import uuid
+from urllib.parse import urlparse
 
 from nicegui import ui
 
@@ -124,69 +125,131 @@ class DashboardMixin:
             '</div>'
         )
 
-    def _stream_mounts_html(self, now: Dict[str, Any]) -> str:
+    def _stream_is_https_playable(self, url: str) -> bool:
+        s = str(url or "").strip()
+        if not s:
+            return False
+        try:
+            parsed = urlparse(s)
+            return parsed.scheme.lower() == "https"
+        except Exception:
+            return False
+
+    def _stream_mount_key(self, item: Dict[str, Any]) -> str:
+        mount = str(item.get("mount") or "").strip().lower()
+        display = str(item.get("display_name") or "").strip().lower()
+        public_url = str(item.get("public_url") or "").strip().lower()
+        return mount or display or public_url
+
+    def _normalize_stream_title(self, item: Dict[str, Any]) -> str:
+        display_name = str(item.get("display_name") or item.get("mount") or "—").strip()
+        if not display_name:
+            return "—"
+
+        mount = str(item.get("mount") or "").strip()
+        fmt = str(item.get("format_label") or "").strip()
+
+        if mount:
+            label = mount
+            if fmt:
+                label = f"{label} ({fmt})"
+            return label
+
+        return display_name
+
+    def _visible_stream_mounts(self, now: Dict[str, Any]) -> List[Dict[str, Any]]:
         mounts = now.get("mounts") if isinstance(now, dict) else None
-        if not isinstance(mounts, list) or not mounts:
+        if not isinstance(mounts, list):
+            return []
+
+        out: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for item in mounts:
+            if not isinstance(item, dict):
+                continue
+
+            public_url = str(item.get("public_url") or "").strip()
+            if not self._stream_is_https_playable(public_url):
+                # En contexte page HTTPS, les flux HTTP sont bloqués par le navigateur.
+                continue
+
+            key = self._stream_mount_key(item)
+            if not key or key in seen:
+                continue
+
+            seen.add(key)
+            out.append(item)
+
+        return out
+
+    def _stream_mounts_html(self, now: Dict[str, Any]) -> str:
+        mounts = self._visible_stream_mounts(now)
+
+        if not mounts:
             return (
-                '<div style="margin-top:12px;padding:12px;border:1px solid rgba(255,255,255,.08);'
-                'border-radius:12px;background:rgba(0,0,0,.12);opacity:.78;">'
-                'No Icecast mountpoints detected.'
+                '<div style="margin-top:14px;border:1px solid rgba(255,255,255,.08);border-radius:16px;'
+                'overflow:hidden;background:linear-gradient(180deg, rgba(23,31,47,.96), rgba(19,27,40,.96));">'
+                '  <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;'
+                'padding:16px 18px;background:linear-gradient(180deg, rgba(39,135,223,.98), rgba(31,122,208,.98));">'
+                '    <div style="font-weight:950;font-size:20px;color:white;">Streams</div>'
+                '    <div style="font-weight:900;font-size:14px;color:rgba(255,255,255,.96);">Auditeurs</div>'
+                '  </div>'
+                '  <div style="padding:16px 18px;color:rgba(255,255,255,.82);">'
+                '    Aucun flux HTTPS lisible détecté.'
+                '  </div>'
                 '</div>'
             )
 
         rows: List[str] = []
 
         for idx, item in enumerate(mounts, start=1):
-            if not isinstance(item, dict):
-                continue
-
             stream_url = str(item.get("public_url") or "").strip()
-            mount = str(item.get("mount") or "—").strip() or "—"
-            display_name = str(item.get("display_name") or mount).strip() or mount
+            title = self._normalize_stream_title(item)
             listeners_raw = item.get("listeners")
             listeners = int(listeners_raw) if isinstance(listeners_raw, int) else 0
 
             player_id = f"az_mount_{idx}_{uuid.uuid4().hex}"
-            display_name_e = html.escape(display_name)
-            stream_url_e = html.escape(stream_url or "—")
+            title_e = html.escape(title)
+            stream_url_e = html.escape(stream_url)
             listeners_e = html.escape(str(listeners))
 
             player_html = (
                 f'<div id="{player_id}" data-stream-url="{stream_url_e}" '
-                'style="display:flex;align-items:center;gap:8px;min-width:0;">'
+                'style="display:flex;align-items:center;justify-content:center;width:44px;height:44px;">'
                 '  <audio class="az-stream-audio" preload="none" crossorigin="anonymous" playsinline></audio>'
-                '  <div style="display:flex;align-items:center;gap:8px;">'
-                f'    <button type="button" onclick="window.azStreamPlay(\'{player_id}\')" '
-                '      style="width:34px;height:34px;border-radius:999px;border:1px solid rgba(255,255,255,.14);'
-                '      background:rgba(255,255,255,.08);color:rgba(255,255,255,.95);font-weight:900;cursor:pointer;">▶</button>'
-                f'    <button type="button" onclick="window.azStreamPause(\'{player_id}\')" '
-                '      style="width:34px;height:34px;border-radius:999px;border:1px solid rgba(255,255,255,.14);'
-                '      background:rgba(255,255,255,.05);color:rgba(255,255,255,.95);font-weight:900;cursor:pointer;">❚❚</button>'
-                '  </div>'
                 '  <div style="display:none;" data-role="state">idle</div>'
+                f'  <button type="button" '
+                f'    onclick="window.azStreamTogglePlayPause(\'{player_id}\', this)" '
+                '    data-role="toggle" data-state="paused" '
+                '    style="width:34px;height:34px;border-radius:999px;border:1px solid rgba(255,255,255,.16);'
+                '    background:rgba(255,255,255,.10);color:rgba(255,255,255,.97);font-weight:900;'
+                '    display:flex;align-items:center;justify-content:center;cursor:pointer;line-height:1;">▶</button>'
                 '</div>'
             )
 
             rows.append(
-                '<div style="display:grid;grid-template-columns:52px 1fr auto;gap:14px;align-items:center;'
-                'padding:14px 10px;border-top:1px solid rgba(255,255,255,.06);">'
-                f'  <div>{player_html}</div>'
-                '  <div style="min-width:0;">'
-                f'    <div style="font-weight:900;color:rgba(255,255,255,.96);line-height:1.25;" data-copy="{display_name_e}">{display_name_e}</div>'
-                f'    <div style="margin-top:4px;font-size:13px;color:rgba(56,189,248,.95);word-break:break-all;" data-copy="{stream_url_e}">{stream_url_e}</div>'
+                '<div style="display:grid;grid-template-columns:52px minmax(0,1fr) 96px;gap:14px;align-items:center;'
+                'padding:16px 14px;border-top:1px solid rgba(255,255,255,.06);">'
+                f'  <div style="display:flex;align-items:center;justify-content:center;">{player_html}</div>'
+                '  <div style="min-width:0;overflow:hidden;">'
+                f'    <div style="font-weight:900;font-size:16px;color:rgba(255,255,255,.98);line-height:1.25;'
+                f'      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" data-copy="{title_e}">{title_e}</div>'
+                f'    <div style="margin-top:5px;font-size:13px;color:rgba(56,189,248,.97);'
+                f'      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" data-copy="{stream_url_e}">{stream_url_e}</div>'
                 '  </div>'
-                '  <div style="text-align:right;white-space:nowrap;min-width:78px;">'
-                f'    <div style="font-weight:900;color:rgba(255,255,255,.96);">{listeners_e}</div>'
-                '    <div style="font-size:12px;color:rgba(255,255,255,.72);">auditeur(s)</div>'
+                '  <div style="text-align:right;white-space:nowrap;">'
+                f'    <div style="font-weight:950;font-size:18px;color:rgba(255,255,255,.98);">{listeners_e}</div>'
+                '    <div style="font-size:12px;color:rgba(255,255,255,.72);margin-top:2px;">auditeur(s)</div>'
                 '  </div>'
                 '</div>'
             )
 
         return (
-            '<div style="margin-top:14px;border:1px solid rgba(255,255,255,.08);border-radius:14px;'
-            'overflow:hidden;background:rgba(0,0,0,.12);">'
+            '<div style="margin-top:14px;border:1px solid rgba(255,255,255,.08);border-radius:16px;'
+            'overflow:hidden;background:linear-gradient(180deg, rgba(23,31,47,.96), rgba(19,27,40,.96));">'
             '  <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;'
-            'padding:14px 16px;background:linear-gradient(180deg, rgba(30,136,229,.92), rgba(21,101,192,.92));">'
+            'padding:16px 18px;background:linear-gradient(180deg, rgba(39,135,223,.98), rgba(31,122,208,.98));">'
             '    <div style="font-weight:950;font-size:20px;color:white;">Streams</div>'
             '    <div style="font-weight:900;font-size:14px;color:rgba(255,255,255,.96);">Auditeurs</div>'
             '  </div>'
@@ -206,9 +269,7 @@ class DashboardMixin:
                 ).props("id=np_title")
                 self._now_meta = ui.html(self._now_meta_html({})).props("id=np_meta")
                 self._now_player = ui.html(self._stream_mounts_html({}))
-                self._now_sources = ui.label(
-                    "Sources: Icecast metadata + engine tempo(select) + scheduler NEXT + engine STREAM_START + Icecast mount list"
-                ).style("opacity:.7; margin-top: 10px;").props("id=np_sources")
+                self._now_sources = ui.label("").style("display:none;").props("id=np_sources")
 
     def _now_meta_html(self, now: Dict[str, Any]) -> str:
         playlist_eff = now.get("playlist_effective")
@@ -298,7 +359,6 @@ class DashboardMixin:
                 self._up_list_container = ui.html('<div class="az-list"><div style="opacity:.7;">—</div></div>').props("id=upcoming_list")
 
     def _card_previous(self) -> None:
-        # Compat method name kept: the History tab already calls _card_previous().
         if not hasattr(self, "_history_page"):
             self._history_page = 1
         if not hasattr(self, "_history_page_size"):
@@ -354,8 +414,6 @@ class DashboardMixin:
             if not title_norm:
                 continue
 
-            # Mitigation front temporaire:
-            # ignore les doublons strictement consécutifs renvoyés par le backend.
             if title_norm == last_title_norm:
                 continue
             last_title_norm = title_norm
@@ -432,7 +490,6 @@ class DashboardMixin:
         await self.refresh_previous()
 
     def _previous_html(self, data: Dict[str, Any]) -> str:
-        # Compat wrapper kept: the old method name is still used by _apply_previous_payload().
         return self._history_html(data)
 
     def _card_logs(self) -> None:
@@ -491,8 +548,7 @@ class DashboardMixin:
         if self._now_player:
             self._now_player.set_content(self._stream_mounts_html(now if isinstance(now, dict) else {}))
         if self._now_sources:
-            source_txt = str((now.get("source") or "Icecast metadata + engine tempo(select)")).strip()
-            self._now_sources.set_text(f"Sources: {source_txt}")
+            self._now_sources.set_text("")
 
     def _apply_upcoming_payload(self, up: Dict[str, Any]) -> None:
         items = up.get("upcoming") or []
@@ -648,7 +704,7 @@ class DashboardMixin:
             if self._now_player:
                 self._now_player.set_content(self._stream_mounts_html({}))
             if self._now_sources:
-                self._now_sources.set_text("Sources: —")
+                self._now_sources.set_text("")
 
     async def refresh_upcoming(self) -> None:
         try:
