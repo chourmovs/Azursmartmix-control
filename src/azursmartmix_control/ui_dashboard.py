@@ -124,8 +124,77 @@ class DashboardMixin:
             '</div>'
         )
 
+    def _stream_mounts_html(self, now: Dict[str, Any]) -> str:
+        mounts = now.get("mounts") if isinstance(now, dict) else None
+        if not isinstance(mounts, list) or not mounts:
+            return (
+                '<div style="margin-top:12px;padding:12px;border:1px solid rgba(255,255,255,.08);'
+                'border-radius:12px;background:rgba(0,0,0,.12);opacity:.78;">'
+                'No Icecast mountpoints detected.'
+                '</div>'
+            )
+
+        rows: List[str] = []
+
+        for idx, item in enumerate(mounts, start=1):
+            if not isinstance(item, dict):
+                continue
+
+            stream_url = str(item.get("public_url") or "").strip()
+            mount = str(item.get("mount") or "—").strip() or "—"
+            display_name = str(item.get("display_name") or mount).strip() or mount
+            listeners_raw = item.get("listeners")
+            listeners = int(listeners_raw) if isinstance(listeners_raw, int) else 0
+
+            player_id = f"az_mount_{idx}_{uuid.uuid4().hex}"
+            display_name_e = html.escape(display_name)
+            stream_url_e = html.escape(stream_url or "—")
+            listeners_e = html.escape(str(listeners))
+
+            player_html = (
+                f'<div id="{player_id}" data-stream-url="{stream_url_e}" '
+                'style="display:flex;align-items:center;gap:8px;min-width:0;">'
+                '  <audio class="az-stream-audio" preload="none" crossorigin="anonymous" playsinline></audio>'
+                '  <div style="display:flex;align-items:center;gap:8px;">'
+                f'    <button type="button" onclick="window.azStreamPlay(\'{player_id}\')" '
+                '      style="width:34px;height:34px;border-radius:999px;border:1px solid rgba(255,255,255,.14);'
+                '      background:rgba(255,255,255,.08);color:rgba(255,255,255,.95);font-weight:900;cursor:pointer;">▶</button>'
+                f'    <button type="button" onclick="window.azStreamPause(\'{player_id}\')" '
+                '      style="width:34px;height:34px;border-radius:999px;border:1px solid rgba(255,255,255,.14);'
+                '      background:rgba(255,255,255,.05);color:rgba(255,255,255,.95);font-weight:900;cursor:pointer;">❚❚</button>'
+                '  </div>'
+                '  <div style="display:none;" data-role="state">idle</div>'
+                '</div>'
+            )
+
+            rows.append(
+                '<div style="display:grid;grid-template-columns:52px 1fr auto;gap:14px;align-items:center;'
+                'padding:14px 10px;border-top:1px solid rgba(255,255,255,.06);">'
+                f'  <div>{player_html}</div>'
+                '  <div style="min-width:0;">'
+                f'    <div style="font-weight:900;color:rgba(255,255,255,.96);line-height:1.25;" data-copy="{display_name_e}">{display_name_e}</div>'
+                f'    <div style="margin-top:4px;font-size:13px;color:rgba(56,189,248,.95);word-break:break-all;" data-copy="{stream_url_e}">{stream_url_e}</div>'
+                '  </div>'
+                '  <div style="text-align:right;white-space:nowrap;min-width:78px;">'
+                f'    <div style="font-weight:900;color:rgba(255,255,255,.96);">{listeners_e}</div>'
+                '    <div style="font-size:12px;color:rgba(255,255,255,.72);">auditeur(s)</div>'
+                '  </div>'
+                '</div>'
+            )
+
+        return (
+            '<div style="margin-top:14px;border:1px solid rgba(255,255,255,.08);border-radius:14px;'
+            'overflow:hidden;background:rgba(0,0,0,.12);">'
+            '  <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;'
+            'padding:14px 16px;background:linear-gradient(180deg, rgba(30,136,229,.92), rgba(21,101,192,.92));">'
+            '    <div style="font-weight:950;font-size:20px;color:white;">Streams</div>'
+            '    <div style="font-weight:900;font-size:14px;color:rgba(255,255,255,.96);">Auditeurs</div>'
+            '  </div>'
+            + "".join(rows)
+            + '</div>'
+        )
+
     def _card_now(self) -> None:
-        stream_url = self._stream_public_url()
         mount = getattr(self.settings, "icecast_mount", "/gst-test.mp3")
         with ui.element("div").classes("az-card"):
             with ui.element("div").classes("az-card-h"):
@@ -136,9 +205,9 @@ class DashboardMixin:
                     "font-weight: 950; margin: 2px 0 0 0;"
                 ).props("id=np_title")
                 self._now_meta = ui.html(self._now_meta_html({})).props("id=np_meta")
-                self._now_player = ui.html(self._player_html(stream_url))
+                self._now_player = ui.html(self._stream_mounts_html({}))
                 self._now_sources = ui.label(
-                    "Sources: Icecast metadata + engine tempo(select) + scheduler NEXT + engine STREAM_START"
+                    "Sources: Icecast metadata + engine tempo(select) + scheduler NEXT + engine STREAM_START + Icecast mount list"
                 ).style("opacity:.7; margin-top: 10px;").props("id=np_sources")
 
     def _now_meta_html(self, now: Dict[str, Any]) -> str:
@@ -419,6 +488,8 @@ class DashboardMixin:
             self._now_title.set_text(title)
         if self._now_meta:
             self._now_meta.set_content(self._now_meta_html(now if isinstance(now, dict) else {}))
+        if self._now_player:
+            self._now_player.set_content(self._stream_mounts_html(now if isinstance(now, dict) else {}))
         if self._now_sources:
             source_txt = str((now.get("source") or "Icecast metadata + engine tempo(select)")).strip()
             self._now_sources.set_text(f"Sources: {source_txt}")
@@ -574,6 +645,8 @@ class DashboardMixin:
                 self._now_title.set_text("—")
             if self._now_meta:
                 self._now_meta.set_content(self._now_meta_html({}))
+            if self._now_player:
+                self._now_player.set_content(self._stream_mounts_html({}))
             if self._now_sources:
                 self._now_sources.set_text("Sources: —")
 
