@@ -1,3 +1,4 @@
+# src/azursmartmix_control/api_factory.py
 from __future__ import annotations
 
 import json
@@ -826,6 +827,19 @@ print(json.dumps(out, ensure_ascii=False))
                 "source": "azuracast_api",
                 "station_id": station_id,
                 "total": 0,
+                "items": [],
+                "error": str(e),
+            }
+
+    @app.get("/icecast/mounts")
+    async def icecast_mounts() -> Dict[str, Any]:
+        try:
+            return await ice.list_mounts()
+        except Exception as e:
+            return {
+                "ok": False,
+                "source": "icecast",
+                "count": 0,
                 "items": [],
                 "error": str(e),
             }
