@@ -1,6 +1,7 @@
+# src/azursmartmix_control/icecast_client.py
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -47,7 +48,60 @@ class IcecastClient:
             return src
         return [src] if isinstance(src, dict) else []
 
-    async def now_playing(self) -> Dict[str, Any]:
+    @staticmethod
+    def _mount_from_source(source: Dict[str, Any]) -> Optional[str]:
+        mount = str(source.get("mount") or "").strip()
+        if mount:
+            return mount if mount.startswith("/") else f"/{mount}"
+
+        listenurl = str(source.get("listenurl") or "").strip()
+        if listenurl:
+            try:
+                # Icecast direct mounts usually end with /mount.ext
+                if "://" in listenurl:
+                    path = listenurl.split("://", 1)[1]
+                    path = "/" + path.split("/", 1)[1] if "/" in path else ""
+                else:
+                    path = listenurl
+                path = path.strip()
+                return path or None
+            except Exception:
+                return None
+
+        return None
+
+    @staticmethod
+    def _item_from_source(source: Dict[str, Any]) -> Dict[str, Any]:
+        mount = IcecastClient._mount_from_source(source) or "unknown"
+        title = source.get("title") or source.get("yp_currently_playing") or None
+        artist = source.get("artist") or None
+
+        listeners = source.get("listeners")
+        try:
+            listeners = int(listeners) if listeners not in (None, "") else 0
+        except Exception:
+            listeners = 0
+
+        bitrate = source.get("bitrate")
+        try:
+            bitrate = int(bitrate) if bitrate not in (None, "") else None
+        except Exception:
+            bitrate = None
+
+        return {
+            "mount": mount,
+            "title": title,
+            "artist": artist,
+            "listeners": listeners,
+            "listener_peak": source.get("listener_peak"),
+            "bitrate": bitrate,
+            "server_name": source.get("server_name"),
+            "genre": source.get("genre"),
+            "listenurl": source.get("listenurl"),
+            "raw": source,
+        }
+
+    async def list_mounts(self) -> Dict[str, Any]:
         try:
             payload = await self.fetch_status()
         except Exception as e:
@@ -55,23 +109,39 @@ class IcecastClient:
                 "ok": False,
                 "source": "icecast",
                 "error": str(e),
+                "items": [],
+            }
+
+        items: List[Dict[str, Any]] = []
+        for source in self._iter_sources(payload):
+            if not isinstance(source, dict):
+                continue
+            items.append(self._item_from_source(source))
+
+        return {
+            "ok": True,
+            "source": "icecast",
+            "count": len(items),
+            "items": items,
+        }
+
+    async def now_playing(self) -> Dict[str, Any]:
+        mounts = await self.list_mounts()
+        if not mounts.get("ok"):
+            return {
+                "ok": False,
+                "source": "icecast",
+                "error": mounts.get("error"),
                 "mount": self.mount,
             }
 
-        sources = self._iter_sources(payload)
         match = None
-        for s in sources:
-            # Icecast uses "listenurl" and/or "mount" depending on version/config
-            mount = s.get("mount") or None
-            if mount is None:
-                listenurl = s.get("listenurl") or ""
-                if listenurl.endswith(self.mount):
-                    match = s
-                    break
-            else:
-                if str(mount) == self.mount:
-                    match = s
-                    break
+        for item in mounts.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("mount") or "") == self.mount:
+                match = item
+                break
 
         if match is None:
             return {
@@ -80,24 +150,22 @@ class IcecastClient:
                 "error": "mount not found in status",
                 "mount": self.mount,
                 "available": [
-                    (s.get("mount") or s.get("listenurl") or "unknown") for s in sources
+                    str(it.get("mount") or "unknown")
+                    for it in (mounts.get("items") or [])
+                    if isinstance(it, dict)
                 ],
             }
-
-        # "title" is what many sources set (often "Artist - Track")
-        title = match.get("title") or match.get("yp_currently_playing") or None
-        artist = match.get("artist") or None
 
         return {
             "ok": True,
             "source": "icecast",
             "mount": self.mount,
-            "title": title,
-            "artist": artist,
+            "title": match.get("title"),
+            "artist": match.get("artist"),
             "listeners": match.get("listeners"),
             "listener_peak": match.get("listener_peak"),
             "bitrate": match.get("bitrate"),
             "server_name": match.get("server_name"),
             "genre": match.get("genre"),
-            "raw": match,
+            "raw": match.get("raw"),
         }
